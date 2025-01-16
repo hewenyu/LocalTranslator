@@ -279,7 +279,8 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
         CacheState cache(
             params_.max_length,
             model_config_.hidden_size,
-            model_config_.num_heads
+            model_config_.num_heads,
+            model_config_.num_layers
         );
         
         // 准备encoder输出tensor
@@ -317,22 +318,105 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
                     attention_shape.data(), attention_shape.size());
 
                 // 运行decoder
-                const char* decoder_input_names[] = {"embed_matrix", "encoder_attention_mask", "input_ids"};
+                std::vector<const char*> decoder_input_names = {
+                    "embed_matrix", "encoder_attention_mask", "input_ids"
+                };
+                
+                std::vector<const char*> decoder_output_names = {
+                    "pre_logits",
+                    "present.0.decoder.key", "present.0.decoder.value",
+                    "present.0.encoder.key", "present.0.encoder.value",
+                    "present.1.decoder.key", "present.1.decoder.value",
+                    "present.1.encoder.key", "present.1.encoder.value",
+                    "present.2.decoder.key", "present.2.decoder.value",
+                    "present.2.encoder.key", "present.2.encoder.value",
+                    "present.3.decoder.key", "present.3.decoder.value",
+                    "present.3.encoder.key", "present.3.encoder.value",
+                    "present.4.decoder.key", "present.4.decoder.value",
+                    "present.4.encoder.key", "present.4.encoder.value",
+                    "present.5.decoder.key", "present.5.decoder.value",
+                    "present.5.encoder.key", "present.5.encoder.value",
+                    "present.6.decoder.key", "present.6.decoder.value",
+                    "present.6.encoder.key", "present.6.encoder.value",
+                    "present.7.decoder.key", "present.7.decoder.value",
+                    "present.7.encoder.key", "present.7.encoder.value",
+                    "present.8.decoder.key", "present.8.decoder.value",
+                    "present.8.encoder.key", "present.8.encoder.value",
+                    "present.9.decoder.key", "present.9.decoder.value",
+                    "present.9.encoder.key", "present.9.encoder.value",
+                    "present.10.decoder.key", "present.10.decoder.value",
+                    "present.10.encoder.key", "present.10.encoder.value",
+                    "present.11.decoder.key", "present.11.decoder.value",
+                    "present.11.encoder.key", "present.11.encoder.value"
+                };
+
+                // 添加past_key_values到输入名称
+                std::vector<std::string> input_name_strings;
+                for (int layer = 0; layer < model_config_.num_layers; ++layer) {
+                    for (const auto& suffix : {".decoder.key", ".decoder.value", ".encoder.key", ".encoder.value"}) {
+                        input_name_strings.push_back("past_key_values." + std::to_string(layer) + suffix);
+                        decoder_input_names.push_back(input_name_strings.back().c_str());
+                    }
+                }
+                
                 std::vector<Ort::Value> decoder_inputs;
                 decoder_inputs.push_back(std::move(encoder_tensor));
                 decoder_inputs.push_back(std::move(attention_mask_tensor));
                 decoder_inputs.push_back(std::move(input_ids_tensor));
+
+                // 添加past_key_values
+                for (int layer = 0; layer < model_config_.num_layers; ++layer) {
+                    if (step == 0) {
+                        // 第一次迭代：decoder key/value为空，encoder key/value来自encoder输出
+                        std::array<int64_t, 4> kv_shape{1, model_config_.num_heads, 0, model_config_.hidden_size / model_config_.num_heads};
+                        std::vector<float> empty_kv;
+                        
+                        auto decoder_key = Ort::Value::CreateTensor<float>(memory_info,
+                            empty_kv.data(), empty_kv.size(), kv_shape.data(), kv_shape.size());
+                        decoder_inputs.push_back(std::move(decoder_key));
+                        
+                        auto decoder_value = Ort::Value::CreateTensor<float>(memory_info,
+                            empty_kv.data(), empty_kv.size(), kv_shape.data(), kv_shape.size());
+                        decoder_inputs.push_back(std::move(decoder_value));
+                        
+                        // 使用encoder的present值
+                        std::array<int64_t, 4> encoder_kv_shape{1, model_config_.num_heads, 
+                            static_cast<int64_t>(encoder_output.size() / model_config_.hidden_size),
+                            model_config_.hidden_size / model_config_.num_heads};
+                        
+                        auto encoder_key = cache.get_encoder_key(layer);
+                        decoder_inputs.push_back(std::move(encoder_key));
+                        
+                        auto encoder_value = cache.get_encoder_value(layer);
+                        decoder_inputs.push_back(std::move(encoder_value));
+                    } else {
+                        // 后续迭代：使用上一次的present值
+                        decoder_inputs.push_back(cache.get_decoder_key(layer));
+                        decoder_inputs.push_back(cache.get_decoder_value(layer));
+                        decoder_inputs.push_back(cache.get_encoder_key(layer));
+                        decoder_inputs.push_back(cache.get_encoder_value(layer));
+                    }
+                }
                 
-                const char* decoder_output_names[] = {"logits"};
                 auto decoder_outputs = decoder_session_->Run(
                     Ort::RunOptions{nullptr},
-                    decoder_input_names,
+                    decoder_input_names.data(),
                     decoder_inputs.data(),
                     decoder_inputs.size(),
-                    decoder_output_names,
-                    1
+                    decoder_output_names.data(),
+                    decoder_output_names.size()
                 );
                 
+                // 更新cache
+                if (step == 0) {
+                    for (int layer = 0; layer < model_config_.num_layers; ++layer) {
+                        cache.update_decoder_key(layer, std::move(decoder_outputs[1 + layer * 4]));
+                        cache.update_decoder_value(layer, std::move(decoder_outputs[2 + layer * 4]));
+                        cache.update_encoder_key(layer, std::move(decoder_outputs[3 + layer * 4]));
+                        cache.update_encoder_value(layer, std::move(decoder_outputs[4 + layer * 4]));
+                    }
+                }
+
                 // 获取logits
                 float* logits_data = decoder_outputs[0].GetTensorMutableData<float>();
                 size_t vocab_size = decoder_outputs[0].GetTensorTypeAndShapeInfo().GetShape()[2];
