@@ -211,21 +211,19 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
             
             auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(
                 memory_info,
-                tokens.data(),
+                const_cast<int64_t*>(tokens.data()),
                 tokens.size(),
                 input_shape.data(),
-                input_shape.size()
-            );
+                input_shape.size());
 
             // 准备encoder输出
             std::array<int64_t, 2> encoder_shape{1, static_cast<int64_t>(encoder_output.size())};
             auto encoder_tensor = Ort::Value::CreateTensor<float>(
                 memory_info,
-                encoder_output.data(),
+                const_cast<float*>(encoder_output.data()),
                 encoder_output.size(),
                 encoder_shape.data(),
-                encoder_shape.size()
-            );
+                encoder_shape.size());
 
             // 运行decoder
             const char* input_names[] = {"input_ids", "encoder_output"};
