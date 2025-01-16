@@ -7,6 +7,7 @@
     "nlohmann-json",
     "gtest",
     "sentencepiece",
-    "spdlog"
+    "spdlog",
+    "benchmark"
   ]
 } 

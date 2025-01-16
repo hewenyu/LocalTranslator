@@ -18,6 +18,7 @@
                 "-L", "C:/Users/boringsoft/code/hewenyu/LocalTranslator/onnxruntime/onnxruntime-win-x64/lib",
                 "-static",
                 "-lyaml-cpp",
+                "-lbenchmark",
                 "-lonnxruntime",
                 "-lgtest",
                 "-lgtest_main",
