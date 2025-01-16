@@ -2,16 +2,49 @@
 #include <stdexcept>
 #include <spdlog/spdlog.h>
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 namespace nllb {
 
 Tokenizer::Tokenizer(const std::string& model_path) {
+    // 检查文件是否存在
+    if (!std::filesystem::exists(model_path)) {
+        throw std::runtime_error("Tokenizer model file not found: " + model_path);
+    }
+
+    // 检查文件大小
+    auto file_size = std::filesystem::file_size(model_path);
+    spdlog::info("Tokenizer model file size: {} bytes", file_size);
+    if (file_size == 0) {
+        throw std::runtime_error("Tokenizer model file is empty: " + model_path);
+    }
+
+    // 尝试打开文件
+    std::ifstream file(model_path, std::ios::binary);
+    if (!file.good()) {
+        throw std::runtime_error("Failed to open tokenizer model file: " + model_path);
+    }
+    file.close();
+
+    // 初始化SentencePiece处理器
     sp_ = std::make_unique<sentencepiece::SentencePieceProcessor>();
+    spdlog::info("Attempting to load tokenizer model from: {}", model_path);
+    
     auto status = sp_->Load(model_path);
     if (!status.ok()) {
+        spdlog::error("Failed to load tokenizer model: {}", status.ToString());
+        spdlog::error("Model path: {}", model_path);
         throw std::runtime_error("Failed to load tokenizer model: " + status.ToString());
     }
-    spdlog::info("Loaded tokenizer model from: {}", model_path);
+
+    // 验证模型加载后的状态
+    if (sp_->GetPieceSize() == 0) {
+        throw std::runtime_error("Loaded model has no vocabulary");
+    }
+
+    spdlog::info("Successfully loaded tokenizer model from: {}", model_path);
+    spdlog::info("Vocabulary size: {}", sp_->GetPieceSize());
 }
 
 Tokenizer::TokenizerOutput Tokenizer::encode(
@@ -20,14 +53,25 @@ Tokenizer::TokenizerOutput Tokenizer::encode(
     const std::string& target_lang) const {
     
     try {
+        if (text.empty()) {
+            throw std::runtime_error("Input text is empty");
+        }
+
         // 添加语言标记
         std::string processed_text = add_language_tokens(text, source_lang, target_lang);
+        spdlog::debug("Processed text with language tokens: {}", processed_text);
         
         // 使用SentencePiece进行分词
         std::vector<int> piece_ids;
         auto status = sp_->Encode(processed_text, &piece_ids);
         if (!status.ok()) {
+            spdlog::error("Tokenization failed: {}", status.ToString());
+            spdlog::error("Input text: {}", text);
             throw std::runtime_error("Tokenization failed: " + status.ToString());
+        }
+
+        if (piece_ids.empty()) {
+            throw std::runtime_error("Tokenization produced no tokens");
         }
 
         // 转换为int64_t
@@ -40,30 +84,38 @@ Tokenizer::TokenizerOutput Tokenizer::encode(
         // 创建attention mask
         std::vector<int64_t> attention_mask(input_ids.size(), 1);
 
+        spdlog::debug("Encoded {} tokens", input_ids.size());
         return {input_ids, attention_mask};
     } catch (const std::exception& e) {
+        spdlog::error("Encoding failed: {}", e.what());
         throw std::runtime_error("Encoding failed: " + std::string(e.what()));
     }
 }
 
 std::string Tokenizer::decode(const std::vector<int64_t>& tokens) const {
     try {
-        // 转换为int
+        if (tokens.empty()) {
+            throw std::runtime_error("Token sequence is empty");
+        }
+
+        // 转换为int类型
         std::vector<int> piece_ids;
         piece_ids.reserve(tokens.size());
         for (int64_t id : tokens) {
             piece_ids.push_back(static_cast<int>(id));
         }
 
-        // 使用SentencePiece进行解码
-        std::string text;
-        auto status = sp_->Decode(piece_ids, &text);
+        std::string result;
+        auto status = sp_->Decode(piece_ids, &result);
         if (!status.ok()) {
+            spdlog::error("Decoding failed: {}", status.ToString());
             throw std::runtime_error("Decoding failed: " + status.ToString());
         }
 
-        return text;
+        spdlog::debug("Decoded {} tokens to text", tokens.size());
+        return result;
     } catch (const std::exception& e) {
+        spdlog::error("Decoding failed: {}", e.what());
         throw std::runtime_error("Decoding failed: " + std::string(e.what()));
     }
 }

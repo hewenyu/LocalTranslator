@@ -43,18 +43,28 @@ ModelConfig ModelConfig::load_from_yaml(const std::string& config_path) {
 
 NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config) 
     : ort_env_(ORT_LOGGING_LEVEL_WARNING, "nllb_translator") {
-    model_dir_ = config.nllb.model_dir;
-    target_lang_ = config.nllb.target_lang;
-    params_ = config.nllb.params;
-    
-    spdlog::info("Initializing NLLB translator with model dir: {}", model_dir_);
-    
     try {
+        // 检查并设置模型目录
+        model_dir_ = std::filesystem::absolute(config.nllb.model_dir).string();
+        if (!std::filesystem::exists(model_dir_)) {
+            throw std::runtime_error("Model directory not found: " + model_dir_);
+        }
+        spdlog::info("Using model directory: {}", model_dir_);
+
+        target_lang_ = config.nllb.target_lang;
+        params_ = config.nllb.params;
+        
+        spdlog::info("Initializing NLLB translator with model dir: {}", model_dir_);
+        
         // 加载模型配置
         std::string config_path = model_dir_ + "/model_config.yaml";
+        if (!std::filesystem::exists(config_path)) {
+            throw std::runtime_error("Model config file not found: " + config_path);
+        }
+        
         model_config_ = ModelConfig::load_from_yaml(config_path);
-        spdlog::info("Loaded model config: hidden_size={}, num_heads={}", 
-                    model_config_.hidden_size, model_config_.num_heads);
+        spdlog::info("Loaded model config: hidden_size={}, num_heads={}, num_layers={}", 
+                    model_config_.hidden_size, model_config_.num_heads, model_config_.num_layers);
 
         // 初始化组件
         initialize_language_codes();
@@ -62,8 +72,17 @@ NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config)
         
         // 初始化tokenizer
         std::string vocab_path = model_dir_ + "/" + config.nllb.model_files.tokenizer_vocab;
-        tokenizer_ = std::make_unique<Tokenizer>(vocab_path);
-        spdlog::info("Initialized tokenizer with vocab: {}", vocab_path);
+        if (!std::filesystem::exists(vocab_path)) {
+            throw std::runtime_error("Tokenizer vocabulary file not found: " + vocab_path);
+        }
+        
+        try {
+            tokenizer_ = std::make_unique<Tokenizer>(vocab_path);
+            spdlog::info("Successfully initialized tokenizer with vocab: {}", vocab_path);
+        } catch (const std::exception& e) {
+            spdlog::error("Failed to initialize tokenizer: {}", e.what());
+            throw;
+        }
 
         // 初始化beam search配置
         beam_config_ = BeamSearchConfig(
@@ -72,14 +91,20 @@ NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config)
             params_.length_penalty,
             0.9f,  // Default EOS penalty
             1,     // Default num return sequences
-            1.0f,  // Default temperature
+            params_.temperature,
             0,     // Default top_k (disabled)
             0.9f,  // Default top_p
             0.9f   // Default repetition penalty
         );
         
         // 创建beam search解码器
-        beam_search_decoder_ = std::make_unique<BeamSearchDecoder>(beam_config_);
+        try {
+            beam_search_decoder_ = std::make_unique<BeamSearchDecoder>(beam_config_);
+            spdlog::info("Successfully initialized beam search decoder");
+        } catch (const std::exception& e) {
+            spdlog::error("Failed to initialize beam search decoder: {}", e.what());
+            throw;
+        }
         
         spdlog::info("NLLB translator initialization completed successfully");
     } catch (const std::exception& e) {
@@ -93,9 +118,16 @@ NLLBTranslator::~NLLBTranslator() = default;
 void NLLBTranslator::initialize_language_codes() {
     spdlog::debug("Loading language codes...");
     std::string lang_file = model_dir_ + "/nllb_supported_languages.xml";
+    
+    if (!std::filesystem::exists(lang_file)) {
+        throw std::runtime_error("Language codes file not found: " + lang_file);
+    }
+
     try {
         tinyxml2::XMLDocument doc;
-        if (doc.LoadFile(lang_file.c_str()) != tinyxml2::XML_SUCCESS) {
+        auto result = doc.LoadFile(lang_file.c_str());
+        if (result != tinyxml2::XML_SUCCESS) {
+            spdlog::error("Failed to load XML file: {} (Error code: {})", lang_file, result);
             throw std::runtime_error("Failed to load XML file: " + lang_file);
         }
 
@@ -104,14 +136,34 @@ void NLLBTranslator::initialize_language_codes() {
             throw std::runtime_error("Invalid XML format: missing root element");
         }
 
+        int count = 0;
         for (auto lang = root->FirstChildElement("language"); lang; lang = lang->NextSiblingElement("language")) {
             auto code = lang->FirstChildElement("code");
             auto nllb_code = lang->FirstChildElement("code_NLLB");
-            if (code && nllb_code) {
-                nllb_language_codes_[code->GetText()] = nllb_code->GetText();
+            
+            if (!code || !nllb_code) {
+                spdlog::warn("Skipping invalid language entry (missing code or NLLB code)");
+                continue;
             }
+
+            const char* code_text = code->GetText();
+            const char* nllb_code_text = nllb_code->GetText();
+            
+            if (!code_text || !nllb_code_text) {
+                spdlog::warn("Skipping invalid language entry (empty code or NLLB code)");
+                continue;
+            }
+
+            nllb_language_codes_[code_text] = nllb_code_text;
+            count++;
+            spdlog::debug("Added language mapping: {} -> {}", code_text, nllb_code_text);
         }
-        spdlog::info("Loaded {} language codes", nllb_language_codes_.size());
+
+        if (count == 0) {
+            throw std::runtime_error("No valid language codes found in file");
+        }
+
+        spdlog::info("Successfully loaded {} language codes", count);
     } catch (const std::exception& e) {
         spdlog::error("Failed to load language codes: {}", e.what());
         throw std::runtime_error("Failed to load language codes: " + std::string(e.what()));
@@ -602,10 +654,28 @@ std::string NLLBTranslator::translate(const std::string& text, const std::string
 }
 
 std::string NLLBTranslator::get_nllb_language_code(const std::string& lang_code) const {
+    if (lang_code.empty()) {
+        throw std::runtime_error("Empty language code provided");
+    }
+
+    spdlog::debug("Looking up NLLB code for language code: {}", lang_code);
+    
+    if (nllb_language_codes_.empty()) {
+        spdlog::error("Language code mapping is empty. Did you call initialize_language_codes()?");
+        throw std::runtime_error("Language code mapping is not initialized");
+    }
+
     auto it = nllb_language_codes_.find(lang_code);
     if (it == nllb_language_codes_.end()) {
+        spdlog::error("Unsupported language code: {}", lang_code);
+        spdlog::error("Available language codes:");
+        for (const auto& pair : nllb_language_codes_) {
+            spdlog::error("  {} -> {}", pair.first, pair.second);
+        }
         throw std::runtime_error("Unsupported language code: " + lang_code);
     }
+
+    spdlog::debug("Found NLLB code: {} -> {}", lang_code, it->second);
     return it->second;
 }
 
