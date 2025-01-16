@@ -148,35 +148,45 @@ std::vector<float> NLLBTranslator::run_encoder(const Tokenizer::TokenizerOutput&
     try {
         // Prepare input tensors
         std::vector<int64_t> input_shape = {1, static_cast<int64_t>(tokens.input_ids.size())};
+        size_t total_elements = 1 * tokens.input_ids.size();  // Calculate total elements from shape
         
-        Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
-            OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
+        auto memory_info = Ort::MemoryInfo::CreateCpu(
+            OrtArenaAllocator, OrtMemTypeDefault);
             
-        Ort::Value input_ids_tensor = Ort::Value::CreateTensor<int64_t>(
+        // Create mutable copies of the data
+        std::vector<int64_t> input_ids(tokens.input_ids.begin(), tokens.input_ids.end());
+        std::vector<int64_t> attention_mask(tokens.attention_mask.begin(), tokens.attention_mask.end());
+            
+        auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(
             memory_info,
-            tokens.input_ids.data(),
-            tokens.input_ids.size(),
+            input_ids.data(),
+            total_elements,
             input_shape.data(),
             input_shape.size()
         );
             
-        Ort::Value attention_mask_tensor = Ort::Value::CreateTensor<int64_t>(
+        auto attention_mask_tensor = Ort::Value::CreateTensor<int64_t>(
             memory_info,
-            tokens.attention_mask.data(),
-            tokens.attention_mask.size(),
+            attention_mask.data(),
+            total_elements,
             input_shape.data(),
             input_shape.size()
         );
 
         // Run encoder
         const char* input_names[] = {"input_ids", "attention_mask"};
-        const Ort::Value input_values[] = {input_ids_tensor, attention_mask_tensor};
+        std::vector<Ort::Value> input_tensors;
+        input_tensors.push_back(std::move(input_ids_tensor));
+        input_tensors.push_back(std::move(attention_mask_tensor));
         const char* output_names[] = {"encoder_output"};
         
         auto encoder_outputs = encoder_session_->Run(
             Ort::RunOptions{nullptr},
-            input_names, input_values, 2,
-            output_names, 1
+            input_names,
+            input_tensors.data(),
+            input_tensors.size(),
+            output_names,
+            1
         );
 
         // Get output data
@@ -216,25 +226,28 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
 
             // 准备decoder输入
             std::vector<int64_t> input_shape = {1, static_cast<int64_t>(tokens.size())};
-            Ort::Value input_ids_tensor = Ort::Value::CreateTensor<int64_t>(
+            auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(
                 memory_info, tokens.data(), tokens.size(), 
                 input_shape.data(), input_shape.size());
 
             // 准备encoder输出
             std::vector<int64_t> encoder_shape = {1, static_cast<int64_t>(encoder_output.size())};
-            Ort::Value encoder_tensor = Ort::Value::CreateTensor<float>(
+            auto encoder_tensor = Ort::Value::CreateTensor<float>(
                 memory_info, encoder_output.data(), encoder_output.size(),
                 encoder_shape.data(), encoder_shape.size());
 
             // 运行decoder
             const char* input_names[] = {"input_ids", "encoder_output"};
+            std::vector<Ort::Value> input_tensors;
+            input_tensors.push_back(std::move(input_ids_tensor));
+            input_tensors.push_back(std::move(encoder_tensor));
             const char* output_names[] = {"logits"};
 
             auto output_tensors = decoder_session_->Run(
                 Ort::RunOptions{nullptr},
                 input_names,
-                {input_ids_tensor, encoder_tensor},
-                2,
+                input_tensors.data(),
+                input_tensors.size(),
                 output_names,
                 1
             );
