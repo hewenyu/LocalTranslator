@@ -27,18 +27,35 @@ target_link_libraries(deeplx_translator_test
 
 # 复制 DLL 到输出目录
 if(WIN32)
-    add_custom_command(TARGET translator_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/x64-windows/bin"
-        $<TARGET_FILE_DIR:translator_test>
+    # 设置 DLL 源目录
+    set(DLL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/x64-windows/bin")
+    set(DLL_DEBUG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/x64-windows/debug/bin")
+    
+    # 复制 Release DLLs
+    file(GLOB RELEASE_DLLS "${DLL_SOURCE_DIR}/*.dll")
+    file(COPY ${RELEASE_DLLS} DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/Debug")
+    
+    # 复制 Debug DLLs
+    file(GLOB DEBUG_DLLS "${DLL_DEBUG_DIR}/*.dll")
+    file(COPY ${DEBUG_DLLS} DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/Debug")
+    
+    # 为每个测试目标设置工作目录
+    set_target_properties(translator_test PROPERTIES
+        VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Debug"
     )
-    add_custom_command(TARGET deeplx_translator_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/x64-windows/bin"
-        $<TARGET_FILE_DIR:deeplx_translator_test>
+    set_target_properties(deeplx_translator_test PROPERTIES
+        VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Debug"
     )
 endif()
 
 # 添加测试
-add_test(NAME TranslatorTest COMMAND translator_test)
-add_test(NAME DeepLXTranslatorTest COMMAND deeplx_translator_test) 
+add_test(
+    NAME TranslatorTest
+    COMMAND translator_test
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Debug"
+)
+add_test(
+    NAME DeepLXTranslatorTest
+    COMMAND deeplx_translator_test
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Debug"
+) 
