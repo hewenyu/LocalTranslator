@@ -8,6 +8,7 @@
 #include "translator/nllb-api/beam_search.h"
 #include <onnxruntime_cxx_api.h>
 #include <onnxruntime_c_api.h>
+#include <windows.h>
 
 namespace nllb {
 
