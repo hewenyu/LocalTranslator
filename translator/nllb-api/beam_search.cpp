@@ -1,12 +1,15 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <random>
+#include <sstream>
 #include "beam_search.h"
 
 namespace nllb {
 
 BeamSearchDecoder::BeamSearchDecoder(const BeamSearchConfig& config)
-    : config_(config) {}
+    : config_(config)
+    , rng_(std::random_device{}()) {}
 
 float BeamSearchDecoder::compute_normalized_score(const BeamHypothesis& hyp) const {
     // 应用长度惩罚
@@ -80,103 +83,237 @@ void BeamSearchDecoder::update_hypotheses(
                      new_hypotheses.begin() + config_.beam_size);
 }
 
+std::vector<float> BeamSearchDecoder::apply_temperature_and_sampling(
+    std::vector<float>& scores,
+    const std::vector<int64_t>& tokens,
+    const std::vector<int64_t>& previous_tokens) const {
+    
+    try {
+        // 应用重复惩罚
+        for (size_t i = 0; i < tokens.size(); ++i) {
+            if (std::find(previous_tokens.begin(), previous_tokens.end(), tokens[i]) != previous_tokens.end()) {
+                scores[i] *= config_.repetition_penalty;
+            }
+        }
+
+        // 应用温度
+        if (config_.temperature != 1.0f) {
+            for (auto& score : scores) {
+                score /= config_.temperature;
+            }
+        }
+
+        // 应用Top-K采样
+        if (config_.top_k > 0) {
+            apply_top_k_sampling(scores);
+        }
+
+        // 应用Top-P采样
+        if (config_.top_p < 1.0f) {
+            apply_top_p_sampling(scores);
+        }
+
+        // 计算softmax
+        float max_score = *std::max_element(scores.begin(), scores.end());
+        float sum = 0.0f;
+        for (auto& score : scores) {
+            score = std::exp(score - max_score);
+            sum += score;
+        }
+        for (auto& score : scores) {
+            score /= sum;
+        }
+
+        return scores;
+    } catch (const std::exception& e) {
+        std::stringstream ss;
+        ss << "Error in temperature sampling: " << e.what();
+        throw std::runtime_error(ss.str());
+    }
+}
+
+void BeamSearchDecoder::apply_top_k_sampling(std::vector<float>& scores) const {
+    if (scores.empty()) return;
+
+    // 找到第k大的元素
+    size_t k = static_cast<size_t>(config_.top_k);
+    k = std::min(k, scores.size());
+    
+    std::vector<float> sorted_scores = scores;
+    std::nth_element(sorted_scores.begin(), 
+                    sorted_scores.begin() + k - 1,
+                    sorted_scores.end(),
+                    std::greater<float>());
+    
+    float threshold = sorted_scores[k - 1];
+    
+    // 将低于阈值的分数设为负无穷
+    for (auto& score : scores) {
+        if (score < threshold) {
+            score = -std::numeric_limits<float>::infinity();
+        }
+    }
+}
+
+void BeamSearchDecoder::apply_top_p_sampling(std::vector<float>& scores) const {
+    if (scores.empty()) return;
+
+    // 计算概率分布
+    std::vector<std::pair<float, size_t>> prob_idx;
+    prob_idx.reserve(scores.size());
+    for (size_t i = 0; i < scores.size(); ++i) {
+        prob_idx.emplace_back(scores[i], i);
+    }
+
+    // 按概率降序排序
+    std::sort(prob_idx.begin(), prob_idx.end(),
+              std::greater<std::pair<float, size_t>>());
+
+    // 计算累积概率
+    float cumsum = 0.0f;
+    size_t last_idx = prob_idx.size();
+    for (size_t i = 0; i < prob_idx.size(); ++i) {
+        cumsum += prob_idx[i].first;
+        if (cumsum > config_.top_p) {
+            last_idx = i + 1;
+            break;
+        }
+    }
+
+    // 创建概率掩码
+    std::vector<bool> mask(scores.size(), false);
+    for (size_t i = 0; i < last_idx; ++i) {
+        mask[prob_idx[i].second] = true;
+    }
+
+    // 应用掩码
+    for (size_t i = 0; i < scores.size(); ++i) {
+        if (!mask[i]) {
+            scores[i] = -std::numeric_limits<float>::infinity();
+        }
+    }
+}
+
 std::vector<BeamHypothesis> BeamSearchDecoder::decode(
     const std::function<std::vector<float>(const std::vector<int64_t>&, const CacheState&)>& step_fn,
     int64_t bos_token_id,
     int64_t eos_token_id,
     int64_t pad_token_id) {
-    
-    // 初始化候选序列
-    std::vector<BeamHypothesis> hypotheses;
-    hypotheses.emplace_back(std::vector<int64_t>{bos_token_id}, 0.0f);
+    try {
+        // 初始化候选序列
+        std::vector<BeamHypothesis> hypotheses;
+        hypotheses.emplace_back(std::vector<int64_t>{bos_token_id}, 0.0f);
 
-    // 初始化缓存状态
-    CacheState cache(config_.max_length, 1024, 16);  // hidden_size和num_heads需要从模型配置中获取
+        // 初始化缓存状态
+        CacheState cache(config_.max_length, 1024, 16);  // hidden_size和num_heads需要从模型配置中获取
 
-    // 提前停止的计数器
-    int no_improvement_steps = 0;
-    float best_score = -std::numeric_limits<float>::infinity();
+        // 提前停止的计数器
+        int no_improvement_steps = 0;
+        float best_score = -std::numeric_limits<float>::infinity();
 
-    // 主解码循环
-    for (int step = 0; step < config_.max_length; ++step) {
-        // 检查是否所有序列都已完成
-        bool all_done = true;
-        for (const auto& hyp : hypotheses) {
-            if (!hyp.is_done) {
-                all_done = false;
+        // 主解码循环
+        for (int step = 0; step < config_.max_length; ++step) {
+            // 检查是否所有序列都已完成
+            bool all_done = true;
+            for (const auto& hyp : hypotheses) {
+                if (!hyp.is_done) {
+                    all_done = false;
+                    break;
+                }
+            }
+            if (all_done) break;
+
+            // 批处理预测
+            std::vector<std::vector<int64_t>> batch_tokens;
+            std::vector<size_t> active_indices;
+            for (size_t i = 0; i < hypotheses.size(); ++i) {
+                if (!hypotheses[i].is_done) {
+                    batch_tokens.push_back(hypotheses[i].tokens);
+                    active_indices.push_back(i);
+                }
+            }
+
+            // 如果没有活跃的序列，退出循环
+            if (batch_tokens.empty()) break;
+
+            // 对每个未完成的候选序列进行下一步预测
+            std::vector<float> next_scores;
+            std::vector<int64_t> next_tokens;
+            
+            for (const auto& tokens : batch_tokens) {
+                try {
+                    // 使用模型进行下一步预测
+                    auto scores = step_fn(tokens, cache);
+                    
+                    // 应用温度采样
+                    scores = apply_temperature_and_sampling(scores, tokens, tokens);
+
+                    // 如果使用采样
+                    if (config_.temperature > 0) {
+                        // 创建分布
+                        std::discrete_distribution<int64_t> dist(scores.begin(), scores.end());
+                        // 采样下一个token
+                        int64_t next_token = dist(rng_);
+                        next_tokens.push_back(next_token);
+                        next_scores.push_back(scores[next_token]);
+                    } else {
+                        // 使用argmax
+                        auto max_it = std::max_element(scores.begin(), scores.end());
+                        next_tokens.push_back(std::distance(scores.begin(), max_it));
+                        next_scores.push_back(*max_it);
+                    }
+                } catch (const std::exception& e) {
+                    std::stringstream ss;
+                    ss << "Error in decoding step " << step << ": " << e.what();
+                    throw std::runtime_error(ss.str());
+                }
+            }
+
+            // 更新候选序列
+            update_hypotheses(hypotheses, next_scores, next_tokens, eos_token_id);
+
+            // 检查是否有更好的分数
+            float current_best = -std::numeric_limits<float>::infinity();
+            for (const auto& hyp : hypotheses) {
+                float score = compute_normalized_score(hyp);
+                current_best = std::max(current_best, score);
+            }
+
+            if (current_best > best_score) {
+                best_score = current_best;
+                no_improvement_steps = 0;
+            } else {
+                no_improvement_steps++;
+            }
+
+            // 如果连续5步没有改善，提前停止
+            if (no_improvement_steps >= 5) {
                 break;
             }
         }
-        if (all_done) break;
 
-        // 批处理预测
-        std::vector<std::vector<int64_t>> batch_tokens;
-        std::vector<size_t> active_indices;
-        for (size_t i = 0; i < hypotheses.size(); ++i) {
-            if (!hypotheses[i].is_done) {
-                batch_tokens.push_back(hypotheses[i].tokens);
-                active_indices.push_back(i);
+        // 对所有未完成的序列添加EOS标记
+        for (auto& hyp : hypotheses) {
+            if (!hyp.is_done) {
+                hyp.tokens.push_back(eos_token_id);
+                hyp.is_done = true;
             }
         }
 
-        // 如果没有活跃的序列，退出循环
-        if (batch_tokens.empty()) break;
+        // 按分数排序并返回前num_return_sequences个序列
+        std::sort(hypotheses.begin(), hypotheses.end(),
+                  [this](const BeamHypothesis& a, const BeamHypothesis& b) {
+                      return compute_normalized_score(a) > compute_normalized_score(b);
+                  });
 
-        // 对每个未完成的候选序列进行下一步预测
-        std::vector<float> next_scores;
-        std::vector<int64_t> next_tokens;
-        
-        for (const auto& tokens : batch_tokens) {
-            // 使用模型进行下一步预测
-            auto scores = step_fn(tokens, cache);
-            
-            // 获取最高分的token
-            auto max_score = *std::max_element(scores.begin(), scores.end());
-            next_scores.push_back(max_score);
-            next_tokens.push_back(std::distance(scores.begin(),
-                                              std::max_element(scores.begin(), scores.end())));
-        }
-
-        // 更新候选序列
-        update_hypotheses(hypotheses, next_scores, next_tokens, eos_token_id);
-
-        // 检查是否有更好的分数
-        float current_best = -std::numeric_limits<float>::infinity();
-        for (const auto& hyp : hypotheses) {
-            float score = compute_normalized_score(hyp);
-            current_best = std::max(current_best, score);
-        }
-
-        if (current_best > best_score) {
-            best_score = current_best;
-            no_improvement_steps = 0;
-        } else {
-            no_improvement_steps++;
-        }
-
-        // 如果连续5步没有改善，提前停止
-        if (no_improvement_steps >= 5) {
-            break;
-        }
+        hypotheses.resize(std::min(static_cast<size_t>(config_.num_return_sequences),
+                                  hypotheses.size()));
+        return hypotheses;
+    } catch (const std::exception& e) {
+        std::stringstream ss;
+        ss << "Beam search decoding failed: " << e.what();
+        throw std::runtime_error(ss.str());
     }
-
-    // 对所有未完成的序列添加EOS标记
-    for (auto& hyp : hypotheses) {
-        if (!hyp.is_done) {
-            hyp.tokens.push_back(eos_token_id);
-            hyp.is_done = true;
-        }
-    }
-
-    // 按分数排序并返回前num_return_sequences个序列
-    std::sort(hypotheses.begin(), hypotheses.end(),
-              [this](const BeamHypothesis& a, const BeamHypothesis& b) {
-                  return compute_normalized_score(a) > compute_normalized_score(b);
-              });
-
-    hypotheses.resize(std::min(static_cast<size_t>(config_.num_return_sequences),
-                              hypotheses.size()));
-    return hypotheses;
 }
 
 } // namespace nllb 
