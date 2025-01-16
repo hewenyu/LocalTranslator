@@ -111,25 +111,84 @@ std::vector<float> NLLBTranslator::run_encoder(const Tokenizer::TokenizerOutput&
 std::vector<int64_t> NLLBTranslator::run_decoder(
     const std::vector<float>& encoder_output,
     const std::string& target_lang) const {
-    std::vector<int64_t> output_ids;
-    output_ids.push_back(tokenizer_->bos_id());  // Start with BOS token
-
-    // Initialize cache if using it
-    std::vector<Ort::Value> cache_states;
-    if (params_.use_cache && cache_init_session_) {
-        // TODO: Initialize cache states
-    }
-
-    // Beam search parameters
-    const int beam_size = params_.beam_size;
-    const int max_length = params_.max_length;
-    const float length_penalty = params_.length_penalty;
-
-    // TODO: Implement beam search decoding
-    // For now, just return a simple sequence
-    output_ids.push_back(tokenizer_->eos_id());
     
-    return output_ids;
+    // 创建beam search配置
+    BeamSearchConfig beam_config(
+        params_.beam_size,
+        params_.max_length,
+        params_.length_penalty,
+        0.9f,  // EOS penalty
+        1      // 返回最好的一个序列
+    );
+
+    // 创建beam search解码器
+    BeamSearchDecoder decoder(beam_config);
+
+    // 定义单步解码函数
+    auto step_function = [this, &encoder_output, &target_lang](
+        const std::vector<int64_t>& tokens,
+        const CacheState& cache) -> std::vector<float> {
+        
+        // 准备输入张量
+        Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
+            OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
+
+        // 准备decoder输入
+        std::vector<int64_t> input_shape = {1, static_cast<int64_t>(tokens.size())};
+        Ort::Value input_ids_tensor = Ort::Value::CreateTensor<int64_t>(
+            memory_info, tokens.data(), tokens.size(), 
+            input_shape.data(), input_shape.size());
+
+        // 准备encoder输出
+        std::vector<int64_t> encoder_shape = {1, static_cast<int64_t>(encoder_output.size())};
+        Ort::Value encoder_tensor = Ort::Value::CreateTensor<float>(
+            memory_info, encoder_output.data(), encoder_output.size(),
+            encoder_shape.data(), encoder_shape.size());
+
+        // 运行decoder
+        const char* input_names[] = {"input_ids", "encoder_output"};
+        const char* output_names[] = {"logits"};
+
+        auto output_tensors = decoder_session_->Run(
+            Ort::RunOptions{nullptr},
+            input_names,
+            {input_ids_tensor, encoder_tensor},
+            2,
+            output_names,
+            1);
+
+        // 获取logits
+        float* logits_data = output_tensors[0].GetTensorMutableData<float>();
+        size_t vocab_size = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape()[2];
+        
+        // 计算最后一个token的概率分布
+        std::vector<float> scores(logits_data + (tokens.size() - 1) * vocab_size,
+                                logits_data + tokens.size() * vocab_size);
+        
+        // 应用softmax
+        float max_score = *std::max_element(scores.begin(), scores.end());
+        float sum = 0.0f;
+        for (auto& score : scores) {
+            score = std::exp(score - max_score);
+            sum += score;
+        }
+        for (auto& score : scores) {
+            score /= sum;
+        }
+
+        return scores;
+    };
+
+    // 执行beam search
+    auto hypotheses = decoder.decode(
+        step_function,
+        tokenizer_->bos_id(),
+        tokenizer_->eos_id(),
+        tokenizer_->pad_id()
+    );
+
+    // 返回最好的序列
+    return hypotheses[0].tokens;
 }
 
 std::string NLLBTranslator::translate(
