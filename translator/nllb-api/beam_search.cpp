@@ -283,7 +283,7 @@ std::vector<float> BeamSearchDecoder::step_fn(
 }
 
 std::vector<BeamHypothesis> BeamSearchDecoder::decode(
-    const std::function<std::vector<float>(const std::vector<int64_t>&, const CacheState&)>& step_fn,
+    const std::vector<int64_t>& input_ids,
     int64_t bos_token_id,
     int64_t eos_token_id,
     int64_t pad_token_id) {
@@ -394,8 +394,7 @@ std::vector<BeamHypothesis> BeamSearchDecoder::decode(
                       return compute_normalized_score(a) > compute_normalized_score(b);
                   });
 
-        hypotheses.resize(std::min(static_cast<size_t>(config_.num_return_sequences),
-                                  hypotheses.size()));
+        hypotheses.resize(std::min<size_t>(config_.num_return_sequences, hypotheses.size()));
         return hypotheses;
     } catch (const std::exception& e) {
         std::stringstream ss;

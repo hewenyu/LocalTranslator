@@ -5,6 +5,7 @@
 #include <map>
 #include <optional>
 #include <vector>
+#include <random>
 #include "translator/translator.h"
 #include "translator/nllb-api/tokenizer.h"
 #include <onnxruntime_cxx_api.h>
@@ -135,6 +136,10 @@ private:
         int64_t eos_token_id);
     void apply_top_k_sampling(std::vector<float>& scores) const;
     void apply_top_p_sampling(std::vector<float>& scores) const;
+    std::vector<float> apply_temperature_and_sampling(
+        std::vector<float>& scores,
+        const std::vector<int64_t>& tokens,
+        const std::vector<int64_t>& previous_tokens) const;
 
     BeamSearchConfig config_;
     std::mt19937 rng_;
