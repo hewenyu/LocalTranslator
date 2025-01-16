@@ -5,6 +5,8 @@
     "yaml-cpp",
     "curl",
     "nlohmann-json",
-    "gtest"
+    "gtest",
+    "sentencepiece",
+    "spdlog"
   ]
 } 
