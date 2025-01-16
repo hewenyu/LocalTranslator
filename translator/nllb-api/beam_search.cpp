@@ -9,7 +9,37 @@ namespace nllb {
 
 BeamSearchDecoder::BeamSearchDecoder(const BeamSearchConfig& config)
     : config_(config)
-    , rng_(std::random_device{}()) {}
+    , rng_(std::random_device{}()) {
+    // 初始化ONNX Runtime会话
+    Ort::SessionOptions session_options;
+    session_options.SetIntraOpNumThreads(1);
+    session_options.SetInterOpNumThreads(1);
+    session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+
+    // 创建会话
+    session_ = std::make_unique<Ort::Session>(nullptr, nullptr, session_options);
+
+    // 初始化输入输出名称
+    size_t num_input_nodes = session_->GetInputCount();
+    input_names_.reserve(num_input_nodes);
+    for (size_t i = 0; i < num_input_nodes; i++) {
+        Ort::AllocatorWithDefaultOptions allocator;
+        input_names_.push_back(session_->GetInputNameAllocated(i, allocator).get());
+    }
+
+    size_t num_output_nodes = session_->GetOutputCount();
+    output_names_.reserve(num_output_nodes);
+    for (size_t i = 0; i < num_output_nodes; i++) {
+        Ort::AllocatorWithDefaultOptions allocator;
+        output_names_.push_back(session_->GetOutputNameAllocated(i, allocator).get());
+    }
+}
+
+BeamSearchDecoder::~BeamSearchDecoder() {
+    // 清理资源
+    input_names_.clear();
+    output_names_.clear();
+}
 
 float BeamSearchDecoder::compute_normalized_score(const BeamHypothesis& hyp) const {
     // 应用长度惩罚
@@ -192,6 +222,64 @@ void BeamSearchDecoder::apply_top_p_sampling(std::vector<float>& scores) const {
             scores[i] = -std::numeric_limits<float>::infinity();
         }
     }
+}
+
+std::vector<float> BeamSearchDecoder::step_fn(
+    const std::vector<int64_t>& tokens,
+    CacheState& cache) {
+    std::vector<float> scores;
+    
+    try {
+        // 准备输入
+        std::vector<Ort::Value> inputs;
+        
+        // 对于每一层处理缓存
+        for (int layer = 0; layer < cache.get_num_layers(); ++layer) {
+            auto& decoder_key = cache.get_decoder_key(layer);
+            auto& decoder_value = cache.get_decoder_value(layer);
+            auto& encoder_key = cache.get_encoder_key(layer);
+            auto& encoder_value = cache.get_encoder_value(layer);
+
+            // 如果缓存中有值，使用它们
+            if (decoder_key && decoder_value && encoder_key && encoder_value) {
+                inputs.emplace_back(std::move(*decoder_key));
+                inputs.emplace_back(std::move(*decoder_value));
+                inputs.emplace_back(std::move(*encoder_key));
+                inputs.emplace_back(std::move(*encoder_value));
+            } else {
+                // 初始化新的缓存值
+                // 这里需要根据实际情况创建新的Ort::Value对象
+                // ...
+            }
+        }
+
+        // 运行模型
+        auto output_tensors = session_->Run(Ort::RunOptions{nullptr}, 
+                                          input_names_.data(), 
+                                          inputs.data(), 
+                                          inputs.size(),
+                                          output_names_.data(), 
+                                          output_names_.size());
+
+        // 更新缓存
+        for (int layer = 0; layer < cache.get_num_layers(); ++layer) {
+            cache.update_decoder_key(layer, std::move(output_tensors[layer * 4]));
+            cache.update_decoder_value(layer, std::move(output_tensors[layer * 4 + 1]));
+            cache.update_encoder_key(layer, std::move(output_tensors[layer * 4 + 2]));
+            cache.update_encoder_value(layer, std::move(output_tensors[layer * 4 + 3]));
+        }
+
+        // 获取logits并转换为scores
+        auto& logits = output_tensors.back();
+        const float* logits_data = logits.GetTensorData<float>();
+        size_t logits_size = logits.GetTensorTypeAndShapeInfo().GetElementCount();
+        scores.assign(logits_data, logits_data + logits_size);
+
+    } catch (const Ort::Exception& e) {
+        throw std::runtime_error(std::string("ONNX Runtime error: ") + e.what());
+    }
+
+    return scores;
 }
 
 std::vector<BeamHypothesis> BeamSearchDecoder::decode(

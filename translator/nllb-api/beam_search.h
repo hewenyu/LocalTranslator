@@ -1,9 +1,12 @@
 #pragma once
 
+#include <string>
+#include <memory>
+#include <map>
+#include <optional>
 #include <vector>
-#include <functional>
-#include <stdexcept>
-#include <random>
+#include "translator/translator.h"
+#include "translator/nllb-api/tokenizer.h"
 #include <onnxruntime_cxx_api.h>
 
 namespace nllb {
@@ -87,66 +90,57 @@ public:
     CacheState(const CacheState&) = delete;
     CacheState& operator=(const CacheState&) = delete;
 
-    Ort::Value&& get_decoder_key(int layer) { return std::move(decoder_keys_[layer]); }
-    Ort::Value&& get_decoder_value(int layer) { return std::move(decoder_values_[layer]); }
-    Ort::Value&& get_encoder_key(int layer) { return std::move(encoder_keys_[layer]); }
-    Ort::Value&& get_encoder_value(int layer) { return std::move(encoder_values_[layer]); }
+    std::optional<Ort::Value>& get_decoder_key(int layer) { return decoder_keys_[layer]; }
+    std::optional<Ort::Value>& get_decoder_value(int layer) { return decoder_values_[layer]; }
+    std::optional<Ort::Value>& get_encoder_key(int layer) { return encoder_keys_[layer]; }
+    std::optional<Ort::Value>& get_encoder_value(int layer) { return encoder_values_[layer]; }
 
     void update_decoder_key(int layer, Ort::Value&& key) { decoder_keys_[layer] = std::move(key); }
     void update_decoder_value(int layer, Ort::Value&& value) { decoder_values_[layer] = std::move(value); }
     void update_encoder_key(int layer, Ort::Value&& key) { encoder_keys_[layer] = std::move(key); }
     void update_encoder_value(int layer, Ort::Value&& value) { encoder_values_[layer] = std::move(value); }
 
+    int get_num_layers() const { return num_layers_; }
+
 private:
     int max_length_;
     int hidden_size_;
     int num_heads_;
     int num_layers_;
-    std::vector<Ort::Value> decoder_keys_;
-    std::vector<Ort::Value> decoder_values_;
-    std::vector<Ort::Value> encoder_keys_;
-    std::vector<Ort::Value> encoder_values_;
+    std::vector<std::optional<Ort::Value>> decoder_keys_;
+    std::vector<std::optional<Ort::Value>> decoder_values_;
+    std::vector<std::optional<Ort::Value>> encoder_keys_;
+    std::vector<std::optional<Ort::Value>> encoder_values_;
 };
 
 // Beam Search解码器
 class BeamSearchDecoder {
 public:
     explicit BeamSearchDecoder(const BeamSearchConfig& config);
+    ~BeamSearchDecoder();
 
-    // 主解码函数
     std::vector<BeamHypothesis> decode(
-        const std::function<std::vector<float>(
-            const std::vector<int64_t>&,
-            const CacheState&)>& step_fn,
+        const std::vector<int64_t>& input_ids,
         int64_t bos_token_id,
         int64_t eos_token_id,
         int64_t pad_token_id);
 
 private:
-    BeamSearchConfig config_;
-    std::mt19937 rng_;  // 随机数生成器
-
-    // 计算归一化分数
+    std::vector<float> step_fn(const std::vector<int64_t>& tokens, CacheState& cache);
     float compute_normalized_score(const BeamHypothesis& hyp) const;
-
-    // 更新候选序列
     void update_hypotheses(
         std::vector<BeamHypothesis>& hypotheses,
         const std::vector<float>& next_scores,
         const std::vector<int64_t>& next_tokens,
         int64_t eos_token_id);
-
-    // 应用温度和采样
-    std::vector<float> apply_temperature_and_sampling(
-        std::vector<float>& scores,
-        const std::vector<int64_t>& tokens,
-        const std::vector<int64_t>& previous_tokens) const;
-
-    // Top-K采样
     void apply_top_k_sampling(std::vector<float>& scores) const;
-
-    // Top-P (nucleus) 采样
     void apply_top_p_sampling(std::vector<float>& scores) const;
+
+    BeamSearchConfig config_;
+    std::mt19937 rng_;
+    std::unique_ptr<Ort::Session> session_;
+    std::vector<const char*> input_names_;
+    std::vector<const char*> output_names_;
 };
 
 } // namespace nllb 
