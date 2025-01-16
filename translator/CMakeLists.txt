@@ -2,6 +2,7 @@ add_library(translator STATIC
     translator.cpp
     deeplx/deeplx_translator.cpp
     nllb-api/nllb_translator.cpp
+    nllb-api/cache_state.cpp
     nllb-api/beam_search.cpp
     nllb-api/tokenizer.cpp
 )

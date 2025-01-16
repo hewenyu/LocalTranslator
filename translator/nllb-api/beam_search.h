@@ -78,11 +78,8 @@ struct BeamHypothesis {
 // 缓存状态管理
 class CacheState {
 public:
-    CacheState(int max_length, int hidden_size, int num_heads, int num_layers)
-        : max_length_(max_length), hidden_size_(hidden_size), num_heads_(num_heads), num_layers_(num_layers),
-          decoder_keys_(num_layers), decoder_values_(num_layers),
-          encoder_keys_(num_layers), encoder_values_(num_layers) {}
-
+    CacheState(int max_length, int hidden_size, int num_heads, int num_layers);
+    
     // 移动构造函数
     CacheState(CacheState&& other) noexcept = default;
     // 移动赋值运算符
@@ -91,15 +88,15 @@ public:
     CacheState(const CacheState&) = delete;
     CacheState& operator=(const CacheState&) = delete;
 
-    std::optional<Ort::Value>& get_decoder_key(int layer) { return decoder_keys_[layer]; }
-    std::optional<Ort::Value>& get_decoder_value(int layer) { return decoder_values_[layer]; }
-    std::optional<Ort::Value>& get_encoder_key(int layer) { return encoder_keys_[layer]; }
-    std::optional<Ort::Value>& get_encoder_value(int layer) { return encoder_values_[layer]; }
+    void update_decoder_key(int layer, Ort::Value&& key);
+    void update_decoder_value(int layer, Ort::Value&& value);
+    void update_encoder_key(int layer, Ort::Value&& key);
+    void update_encoder_value(int layer, Ort::Value&& value);
 
-    void update_decoder_key(int layer, Ort::Value&& key) { decoder_keys_[layer] = std::move(key); }
-    void update_decoder_value(int layer, Ort::Value&& value) { decoder_values_[layer] = std::move(value); }
-    void update_encoder_key(int layer, Ort::Value&& key) { encoder_keys_[layer] = std::move(key); }
-    void update_encoder_value(int layer, Ort::Value&& value) { encoder_values_[layer] = std::move(value); }
+    std::optional<Ort::Value>& get_decoder_key(int layer);
+    std::optional<Ort::Value>& get_decoder_value(int layer);
+    std::optional<Ort::Value>& get_encoder_key(int layer);
+    std::optional<Ort::Value>& get_encoder_value(int layer);
 
     int get_num_layers() const { return num_layers_; }
 
@@ -117,7 +114,7 @@ private:
 // Beam Search解码器
 class BeamSearchDecoder {
 public:
-    explicit BeamSearchDecoder(const BeamSearchConfig& config);
+    explicit BeamSearchDecoder(const BeamSearchConfig& config, const std::string& model_dir);
     ~BeamSearchDecoder();
 
     std::vector<BeamHypothesis> decode(
@@ -127,20 +124,6 @@ public:
         int64_t pad_token_id);
 
 private:
-    std::vector<float> step_fn(const std::vector<int64_t>& tokens, CacheState& cache);
-    float compute_normalized_score(const BeamHypothesis& hyp) const;
-    void update_hypotheses(
-        std::vector<BeamHypothesis>& hypotheses,
-        const std::vector<float>& next_scores,
-        const std::vector<int64_t>& next_tokens,
-        int64_t eos_token_id);
-    void apply_top_k_sampling(std::vector<float>& scores) const;
-    void apply_top_p_sampling(std::vector<float>& scores) const;
-    std::vector<float> apply_temperature_and_sampling(
-        std::vector<float>& scores,
-        const std::vector<int64_t>& tokens,
-        const std::vector<int64_t>& previous_tokens) const;
-
     BeamSearchConfig config_;
     std::mt19937 rng_;
     std::unique_ptr<Ort::Session> session_;

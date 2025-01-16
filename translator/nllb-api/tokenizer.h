@@ -50,7 +50,7 @@ private:
                                   const std::string& target_lang) const;
 
     // NLLB supported languages
-    static constexpr size_t NLLB_LANGUAGES_COUNT = 200;  // 更新为实际支持的语言数量
+    static constexpr size_t NLLB_LANGUAGES_COUNT = 256;  // 更新为实际支持的语言数量
     static const std::array<const char*, NLLB_LANGUAGES_COUNT> NLLB_LANGUAGES;
 };
 
