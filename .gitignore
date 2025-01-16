@@ -52,4 +52,4 @@ vcpkg_installed/
 
 # ignore all files in the models directory
 models/
-
+onnxruntime/
