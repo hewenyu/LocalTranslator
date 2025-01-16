@@ -11,6 +11,7 @@
 #include <onnxruntime_c_api.h>
 #include <windows.h>
 #include <tinyxml2.h>
+#include <numeric>
 
 namespace nllb {
 
@@ -123,6 +124,29 @@ void NLLBTranslator::load_models() {
         session_opts.SetIntraOpNumThreads(params_.num_threads);
         session_opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
 
+        // Load embedding and lm head model first
+        std::string embed_lm_path = model_dir_ + "/NLLB_embed_and_lm_head.onnx";
+        std::wstring w_embed_lm_path = to_wstring(embed_lm_path);
+        embed_lm_head_session_ = std::make_unique<Ort::Session>(ort_env_,
+            w_embed_lm_path.c_str(), session_opts);
+        spdlog::info("Loaded embedding and lm head model: {}", embed_lm_path);
+
+        // Print embedding model info
+        Ort::AllocatorWithDefaultOptions allocator;
+        size_t embed_input_nodes = embed_lm_head_session_->GetInputCount();
+        spdlog::info("Embedding model input nodes: {}", embed_input_nodes);
+        for (size_t i = 0; i < embed_input_nodes; i++) {
+            auto input_name = embed_lm_head_session_->GetInputNameAllocated(i, allocator);
+            spdlog::info("Embedding input {}: {}", i, input_name.get());
+        }
+
+        size_t embed_output_nodes = embed_lm_head_session_->GetOutputCount();
+        spdlog::info("Embedding model output nodes: {}", embed_output_nodes);
+        for (size_t i = 0; i < embed_output_nodes; i++) {
+            auto output_name = embed_lm_head_session_->GetOutputNameAllocated(i, allocator);
+            spdlog::info("Embedding output {}: {}", i, output_name.get());
+        }
+
         // Load encoder
         std::string encoder_path = model_dir_ + "/NLLB_encoder.onnx";
         std::wstring w_encoder_path = to_wstring(encoder_path);
@@ -130,8 +154,14 @@ void NLLBTranslator::load_models() {
             w_encoder_path.c_str(), session_opts);
         spdlog::info("Loaded encoder model: {}", encoder_path);
 
-        // Print encoder output names
-        Ort::AllocatorWithDefaultOptions allocator;
+        // Print encoder info
+        size_t num_input_nodes = encoder_session_->GetInputCount();
+        spdlog::info("Encoder input nodes: {}", num_input_nodes);
+        for (size_t i = 0; i < num_input_nodes; i++) {
+            auto input_name = encoder_session_->GetInputNameAllocated(i, allocator);
+            spdlog::info("Encoder input {}: {}", i, input_name.get());
+        }
+
         size_t num_output_nodes = encoder_session_->GetOutputCount();
         spdlog::info("Encoder output nodes: {}", num_output_nodes);
         for (size_t i = 0; i < num_output_nodes; i++) {
@@ -145,13 +175,6 @@ void NLLBTranslator::load_models() {
         decoder_session_ = std::make_unique<Ort::Session>(ort_env_,
             w_decoder_path.c_str(), session_opts);
         spdlog::info("Loaded decoder model: {}", decoder_path);
-
-        // Load embed and lm head
-        std::string embed_path = model_dir_ + "/NLLB_embed_and_lm_head.onnx";
-        std::wstring w_embed_path = to_wstring(embed_path);
-        embed_lm_head_session_ = std::make_unique<Ort::Session>(ort_env_,
-            w_embed_path.c_str(), session_opts);
-        spdlog::info("Loaded embedding model: {}", embed_path);
 
         // Load cache initializer if using cache
         if (params_.use_cache) {
@@ -172,43 +195,56 @@ std::vector<float> NLLBTranslator::run_encoder(const Tokenizer::TokenizerOutput&
     auto start_time = std::chrono::high_resolution_clock::now();
 
     try {
-        constexpr size_t max_sequence_length = 512;  // Maximum sequence length
+        // 1. 获取embeddings
+        auto embeddings = run_embedding(tokens.input_ids);
+        spdlog::debug("Generated embeddings");
+        
+        // 2. 准备encoder输入
+        auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
         std::array<int64_t, 2> input_shape{1, static_cast<int64_t>(tokens.input_ids.size())};
         
-        auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
+        // 创建input_ids tensor
+        auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(memory_info,
+            const_cast<int64_t*>(tokens.input_ids.data()),
+            tokens.input_ids.size(), input_shape.data(), input_shape.size());
             
-        // Create input tensors
-        auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(memory_info, const_cast<int64_t*>(tokens.input_ids.data()), 
-                                                                 tokens.input_ids.size(), input_shape.data(), input_shape.size());
+        // 创建attention_mask tensor
+        auto attention_mask_tensor = Ort::Value::CreateTensor<int64_t>(memory_info,
+            const_cast<int64_t*>(tokens.attention_mask.data()),
+            tokens.attention_mask.size(), input_shape.data(), input_shape.size());
             
-        auto attention_mask_tensor = Ort::Value::CreateTensor<int64_t>(memory_info, const_cast<int64_t*>(tokens.attention_mask.data()),
-                                                                      tokens.attention_mask.size(), input_shape.data(), input_shape.size());
-
-        // Run encoder
-        const char* input_names[] = {"input_ids", "attention_mask"};
-        std::vector<Ort::Value> input_tensors;
-        input_tensors.push_back(std::move(input_ids_tensor));
-        input_tensors.push_back(std::move(attention_mask_tensor));
-        const char* output_names[] = {"last_hidden_state"};
+        // 创建embeddings tensor
+        std::array<int64_t, 3> embed_shape{1, static_cast<int64_t>(tokens.input_ids.size()), model_config_.hidden_size};
+        auto embed_tensor = Ort::Value::CreateTensor<float>(memory_info,
+            embeddings.data(), embeddings.size(), embed_shape.data(), embed_shape.size());
         
+        // 3. 运行encoder
+        const char* encoder_input_names[] = {"input_ids", "attention_mask", "embed_matrix"};
+        std::vector<Ort::Value> encoder_inputs;
+        encoder_inputs.push_back(std::move(input_ids_tensor));
+        encoder_inputs.push_back(std::move(attention_mask_tensor));
+        encoder_inputs.push_back(std::move(embed_tensor));
+        
+        const char* encoder_output_names[] = {"last_hidden_state"};
         auto encoder_outputs = encoder_session_->Run(
             Ort::RunOptions{nullptr},
-            input_names,
-            input_tensors.data(),
-            input_tensors.size(),
-            output_names,
+            encoder_input_names,
+            encoder_inputs.data(),
+            encoder_inputs.size(),
+            encoder_output_names,
             1
         );
 
-        // Get output data
-        float* output_data = encoder_outputs[0].GetTensorMutableData<float>();
+        // 获取输出数据
+        const float* output_data = encoder_outputs[0].GetTensorData<float>();
         size_t output_size = encoder_outputs[0].GetTensorTypeAndShapeInfo().GetElementCount();
+        std::vector<float> result(output_data, output_data + output_size);
         
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
         spdlog::debug("Encoder completed in {} ms", duration.count());
-
-        return std::vector<float>(output_data, output_data + output_size);
+        
+        return result;
     } catch (const std::exception& e) {
         spdlog::error("Encoder failed: {}", e.what());
         throw;
@@ -513,6 +549,55 @@ std::string NLLBTranslator::get_nllb_language_code(const std::string& lang_code)
 
 std::string NLLBTranslator::get_target_language() const {
     return target_lang_;
+}
+
+std::vector<float> NLLBTranslator::run_embedding(const std::vector<int64_t>& input_ids) const {
+    try {
+        auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
+        std::array<int64_t, 2> input_shape{1, static_cast<int64_t>(input_ids.size())};
+        
+        // 创建input_ids tensor
+        auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(memory_info, 
+            const_cast<int64_t*>(input_ids.data()),
+            input_ids.size(), input_shape.data(), input_shape.size());
+            
+        // 创建use_lm_head tensor (标量，值为false表示只要embeddings)
+        std::array<int64_t, 1> scalar_shape{1};
+        bool use_lm_head_value = false;
+        auto use_lm_head_tensor = Ort::Value::CreateTensor<bool>(memory_info,
+            &use_lm_head_value, 1, scalar_shape.data(), scalar_shape.size());
+            
+        // pre_logits为空tensor，因为我们只需要embeddings
+        std::array<int64_t, 2> empty_shape{0, model_config_.hidden_size};
+        auto pre_logits_tensor = Ort::Value::CreateTensor<float>(memory_info,
+            nullptr, 0, empty_shape.data(), empty_shape.size());
+            
+        // 运行embedding模型
+        const char* embed_input_names[] = {"use_lm_head", "input_ids", "pre_logits"};
+        std::vector<Ort::Value> embed_inputs;
+        embed_inputs.push_back(std::move(use_lm_head_tensor));
+        embed_inputs.push_back(std::move(input_ids_tensor));
+        embed_inputs.push_back(std::move(pre_logits_tensor));
+        
+        const char* embed_output_names[] = {"embeddings"};
+        auto embed_outputs = embed_lm_head_session_->Run(
+            Ort::RunOptions{nullptr},
+            embed_input_names,
+            embed_inputs.data(),
+            embed_inputs.size(),
+            embed_output_names,
+            1
+        );
+        
+        // 获取输出
+        const float* output_data = embed_outputs[0].GetTensorData<float>();
+        size_t output_size = embed_outputs[0].GetTensorTypeAndShapeInfo().GetElementCount();
+        return std::vector<float>(output_data, output_data + output_size);
+        
+    } catch (const std::exception& e) {
+        spdlog::error("Embedding failed: {}", e.what());
+        throw;
+    }
 }
 
 } // namespace nllb 

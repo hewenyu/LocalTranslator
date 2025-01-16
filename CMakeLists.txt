@@ -98,16 +98,27 @@ target_include_directories(${PROJECT_NAME}
 
 # Windows下复制DLL到输出目录
 if(WIN32)
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${ONNXRUNTIME_DLL}"
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>
-    )
+    # 复制onnxruntime.dll
+    if(EXISTS "${ONNXRUNTIME_DLL}")
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ONNXRUNTIME_DLL}"
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>
+            COMMENT "Copying onnxruntime.dll to output directory"
+        )
+    else()
+        message(WARNING "ONNXRUNTIME_DLL not found at: ${ONNXRUNTIME_DLL}")
+    endif()
 
-    # 复制其他依赖DLL
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/bin"
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>
-    )
+    # 复制vcpkg依赖
+    if(EXISTS "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/bin")
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/bin"
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>
+            COMMENT "Copying vcpkg dependencies to output directory"
+        )
+    else()
+        message(WARNING "vcpkg binaries directory not found at: ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/bin")
+    endif()
 endif() 

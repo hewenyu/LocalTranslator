@@ -43,17 +43,28 @@ add_test(NAME translator_test COMMAND translator_test)
 # Windows下复制依赖DLL到测试目录
 if(WIN32)
     foreach(TARGET translator_test nllb_translator_benchmark)
-        add_custom_command(TARGET ${TARGET} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${ONNXRUNTIME_DLL}"
-            $<TARGET_FILE_DIR:${TARGET}>
-        )
+        # 复制onnxruntime.dll
+        if(EXISTS "${ONNXRUNTIME_DLL}")
+            add_custom_command(TARGET ${TARGET} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${ONNXRUNTIME_DLL}"
+                $<TARGET_FILE_DIR:${TARGET}>
+                COMMENT "Copying onnxruntime.dll to output directory"
+            )
+        else()
+            message(WARNING "ONNXRUNTIME_DLL not found at: ${ONNXRUNTIME_DLL}")
+        endif()
 
-        # 复制其他依赖DLL
-        add_custom_command(TARGET ${TARGET} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "$ENV{VCPKG_ROOT}/installed/x64-windows/bin"
-            $<TARGET_FILE_DIR:${TARGET}>
-        )
+        # 复制vcpkg依赖
+        if(DEFINED ENV{VCPKG_ROOT} AND EXISTS "$ENV{VCPKG_ROOT}/installed/x64-windows/bin")
+            add_custom_command(TARGET ${TARGET} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "$ENV{VCPKG_ROOT}/installed/x64-windows/bin"
+                $<TARGET_FILE_DIR:${TARGET}>
+                COMMENT "Copying vcpkg dependencies to output directory"
+            )
+        else()
+            message(WARNING "VCPKG binaries directory not found. Please make sure VCPKG_ROOT is set correctly.")
+        endif()
     endforeach()
 endif() 

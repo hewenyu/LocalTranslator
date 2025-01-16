@@ -36,6 +36,7 @@ private:
     std::unique_ptr<Ort::Session> decoder_session_;
     std::unique_ptr<Ort::Session> embed_lm_head_session_;
     std::unique_ptr<Ort::Session> cache_init_session_;
+    std::unique_ptr<Ort::Session> embed_session_;
 
     // Tokenizer
     std::unique_ptr<Tokenizer> tokenizer_;
@@ -58,6 +59,7 @@ private:
     
     // Model inference
     std::vector<float> run_encoder(const Tokenizer::TokenizerOutput& tokens) const;
+    std::vector<float> run_embedding(const std::vector<int64_t>& input_ids) const;
     std::vector<int64_t> run_decoder(const std::vector<float>& encoder_output,
                                    const std::string& target_lang) const;
 };
