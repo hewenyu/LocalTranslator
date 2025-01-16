@@ -10,7 +10,9 @@
                 "-g",
                 "${file}",
                 "-o",
-                "${fileDirname}\\${fileBasenameNoExtension}.exe"
+                "${fileDirname}\\${fileBasenameNoExtension}.exe",
+                "-I", "C:/Users/boringsoft/code/microsoft/vcpkg/installed/x64-windows/include",
+                "-L", "C:/Users/boringsoft/code/microsoft/vcpkg/installed/x64-windows/lib"
             ],
             "options": {
                 "cwd": "${fileDirname}"

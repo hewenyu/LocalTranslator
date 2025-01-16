@@ -1,31 +1,102 @@
-# Windows C++ 开发环境配置指南
+# LocalTranslator
 
-本指南介绍如何在 Windows 系统上配置 C++ 开发环境，使用 MSYS2/MinGW-w64 作为编译工具链。
+A local translation tool that supports multiple translation backends including DeepLX and NLLB.
 
-## 1. 安装 MSYS2
+## Prerequisites
 
-1. 访问 [MSYS2 官网](https://www.msys2.org/) 下载安装程序
-2. 运行安装程序，建议安装到默认位置 `C:\msys64`
+### Windows
+- Windows 10/11
+- Visual Studio Code
+- MinGW-w64 (GCC)
+- vcpkg package manager
 
-## 2. 安装编译工具
+### Linux
+- GCC/G++
+- Visual Studio Code
+- vcpkg package manager
 
-1. 打开 "MSYS2 MINGW64" 终端（在开始菜单中搜索）
-2. 运行以下命令更新系统并安装必要工具：
+## Setup Instructions
+
+### 1. Install vcpkg
+
+#### Windows
 ```bash
-pacman -Syu
-pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-gdb
+# Clone vcpkg repository
+git clone https://github.com/Microsoft/vcpkg.git
+
+# Run the bootstrap script
+.\vcpkg\bootstrap-vcpkg.bat
 ```
 
-## 3. 配置环境变量
+#### Linux
+```bash
+# Clone vcpkg repository
+git clone https://github.com/Microsoft/vcpkg.git
 
-1. 按 Win + R，输入 sysdm.cpl
-2. 点击"高级" -> "环境变量"
-3. 在"系统变量"的 Path 中添加：`C:\msys64\mingw64\bin`
-4. 点击"确定"保存
+# Run the bootstrap script
+./vcpkg/bootstrap-vcpkg.sh
+```
 
-## 4. 配置 VS Code
+### 2. Install Dependencies
 
-### tasks.json
+There are two ways to install the required dependencies:
+
+#### Option 1: Using vcpkg.json (Recommended)
+The project includes a `vcpkg.json` manifest file that specifies all required dependencies. To install them:
+
+```bash
+# Navigate to the project directory containing vcpkg.json
+cd path/to/project
+
+# For Windows
+vcpkg install --triplet x64-windows
+
+# For Linux
+vcpkg install --triplet x64-linux
+```
+
+#### Option 2: Manual Installation
+If you prefer to install dependencies manually:
+
+```bash
+# Windows
+vcpkg install yaml-cpp:x64-windows
+
+# Linux
+vcpkg install yaml-cpp:x64-linux
+```
+
+### 3. Environment Configuration
+
+#### Windows
+Add the following path to your system's PATH environment variable:
+```
+C:\Users\[YourUsername]\code\microsoft\vcpkg\installed\x64-windows\bin
+```
+
+#### Linux
+Add the following to your `~/.bashrc` or `~/.zshrc`:
+```bash
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$HOME/vcpkg/installed/x64-linux/lib
+```
+
+### 4. VSCode Configuration
+
+The project includes three important configuration files in the `.vscode` directory:
+
+#### Windows Configuration
+
+1. `settings.json`:
+```json
+{
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/**",
+        "C:/Users/[YourUsername]/code/microsoft/vcpkg/installed/x64-windows/include"
+    ]
+}
+```
+
+2. `tasks.json`:
 ```json
 {
     "version": "2.0.0",
@@ -33,31 +104,60 @@ pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-gdb
         {
             "type": "cppbuild",
             "label": "C/C++: g++ build active file",
-            "command": "g++.exe",
+            "command": "g++",
             "args": [
                 "-fdiagnostics-color=always",
                 "-g",
                 "${file}",
                 "-o",
-                "${fileDirname}\\${fileBasenameNoExtension}.exe"
-            ],
-            "options": {
-                "cwd": "${fileDirname}"
-            },
-            "problemMatcher": [
-                "$gcc"
-            ],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
-            "detail": "编译器: g++"
+                "${fileDirname}\\${fileBasenameNoExtension}.exe",
+                "-I", "C:/Users/[YourUsername]/code/microsoft/vcpkg/installed/x64-windows/include",
+                "-L", "C:/Users/[YourUsername]/code/microsoft/vcpkg/installed/x64-windows/lib",
+                "-lyaml-cpp"
+            ]
         }
     ]
 }
 ```
 
-### launch.json
+#### Linux Configuration
+
+1. `settings.json`:
+```json
+{
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/**",
+        "${HOME}/vcpkg/installed/x64-linux/include"
+    ]
+}
+```
+
+2. `tasks.json`:
+```json
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "cppbuild",
+            "label": "C/C++: g++ build active file",
+            "command": "g++",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-g",
+                "${file}",
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}",
+                "-I", "${HOME}/vcpkg/installed/x64-linux/include",
+                "-L", "${HOME}/vcpkg/installed/x64-linux/lib",
+                "-lyaml-cpp",
+                "-Wl,-rpath,${HOME}/vcpkg/installed/x64-linux/lib"
+            ]
+        }
+    ]
+}
+```
+
+3. `launch.json`:
 ```json
 {
     "version": "0.2.0",
@@ -66,47 +166,15 @@ pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-gdb
             "name": "C++ Debug",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${fileDirname}\\${fileBasenameNoExtension}.exe",
-            "args": [],
-            "stopAtEntry": false,
-            "cwd": "${fileDirname}",
-            "environment": [],
-            "externalConsole": false,
-            "MIMode": "gdb",
-            "miDebuggerPath": "C:\\msys64\\mingw64\\bin\\gdb.exe",
-            "setupCommands": [
-                {
-                    "description": "Enable pretty-printing for gdb",
-                    "text": "-enable-pretty-printing",
-                    "ignoreFailures": true
-                }
-            ],
-            "preLaunchTask": "C/C++: g++ build active file"
+            "program": "${fileDirname}/${fileBasenameNoExtension}",
+            "miDebuggerPath": "/usr/bin/gdb"
         }
     ]
 }
 ```
 
-## 5. 验证安装
+## Project Structure
 
-1. 打开新的终端，运行：
-```bash
-g++ --version
-```
-应该显示版本信息
-
-2. 在编辑器中创建并运行一个简单的 C++ 程序：
-```cpp
-#include <iostream>
-
-int main() {
-    std::cout << "Hello, World!" << std::endl;
-    return 0;
-}
-```
-
-## 注意事项
-
-- 如果命令提示符找不到 g++，请确保重新打开终端
-- 确保所有配置文件中的路径使用双反斜杠 `\\`
-- 如果使用 Cursor 编辑器，配置过程与 VS Code 相同 
+- `translator/` - Core translation functionality
+  - `translator.h` - Main translator interface and configurations
+- `vcpkg.json` - Project dependencies manifest 
