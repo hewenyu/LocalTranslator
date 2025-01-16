@@ -1,145 +1,147 @@
-#include "nllb_translator.h"
-#include <nlohmann/json.hpp>
-#include <algorithm>
+#include <fstream>
 #include <stdexcept>
-#include <sstream>
+#include <filesystem>
+#include <yaml-cpp/yaml.h>
+#include "translator/nllb-api/nllb_translator.h"
 
 namespace nllb {
 
-using json = nlohmann::json;
-
-namespace {
-    size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* userp) {
-        userp->append((char*)contents, size * nmemb);
-        return size * nmemb;
-    }
+NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config) 
+    : ort_env_(ORT_LOGGING_LEVEL_WARNING, "nllb_translator") {
+    model_dir_ = config.nllb.model_dir;
+    target_lang_ = config.nllb.target_lang;
+    
+    // Initialize
+    initialize_language_codes();
+    load_models();
 }
 
-NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config) {
-    url_ = config.url;
-    target_lang_ = config.target_lang;
-    
-    // Parse URL into components
-    size_t protocol_end = url_.find("://");
-    if (protocol_end != std::string::npos) {
-        url_ = url_.substr(protocol_end + 3);
-    }
-    
-    size_t path_start = url_.find('/');
-    if (path_start != std::string::npos) {
-        host_ = url_.substr(0, path_start);
-        path_ = url_.substr(path_start);
-    } else {
-        host_ = url_;
-        path_ = "/";
-    }
-    
-    size_t port_start = host_.find(':');
-    if (port_start != std::string::npos) {
-        port_ = std::stoi(host_.substr(port_start + 1));
-        host_ = host_.substr(0, port_start);
-    } else {
-        port_ = 80;
-    }
-    
-    curl_ = curl_easy_init();
-    if (!curl_) {
-        throw std::runtime_error("Failed to initialize CURL");
-    }
-}
+NLLBTranslator::~NLLBTranslator() = default;
 
-NLLBTranslator::~NLLBTranslator() {
-    if (curl_) {
-        curl_easy_cleanup(curl_);
-    }
-}
-
-std::string NLLBTranslator::translate(const std::string& text, const std::string& source_lang) const {
-    if (!needs_translation(source_lang)) {
-        return text;
-    }
-
-    json request_data = {
-        {"text", text},
-        {"source_lang", convert_to_nllb_lang_code(source_lang)},
-        {"target_lang", convert_to_nllb_lang_code(target_lang_)}
-    };
-
-    auto response = send_post_request(request_data.dump());
-    
-    if (response.status_code != 200) {
-        throw std::runtime_error("Translation request failed with status code: " + 
-                               std::to_string(response.status_code));
-    }
-
+void NLLBTranslator::initialize_language_codes() {
+    // Load language codes from YAML file
+    std::string lang_file = model_dir_ + "/nllb_languages.yaml";
     try {
-        json response_json = json::parse(response.body);
-        return response_json["translation"].get<std::string>();
-    } catch (const json::exception& e) {
-        throw std::runtime_error("Failed to parse translation response: " + std::string(e.what()));
+        YAML::Node config = YAML::LoadFile(lang_file);
+        for (const auto& lang : config["languages"]) {
+            std::string code = lang["code"].as<std::string>();
+            std::string nllb_code = lang["code_NLLB"].as<std::string>();
+            nllb_language_codes_[code] = nllb_code;
+        }
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Failed to load language codes: " + std::string(e.what()));
+    }
+}
+
+void NLLBTranslator::load_models() {
+    Ort::SessionOptions session_opts;
+    session_opts.SetIntraOpNumThreads(1);
+    session_opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+
+    // Load encoder
+    std::string encoder_path = model_dir_ + "/NLLB_encoder.onnx";
+    encoder_session_ = std::make_unique<Ort::Session>(ort_env_, 
+        encoder_path.c_str(), session_opts);
+
+    // Load decoder
+    std::string decoder_path = model_dir_ + "/NLLB_decoder.onnx";
+    decoder_session_ = std::make_unique<Ort::Session>(ort_env_,
+        decoder_path.c_str(), session_opts);
+
+    // Load embed and lm head
+    std::string embed_path = model_dir_ + "/NLLB_embed_and_lm_head.onnx";
+    embed_lm_head_session_ = std::make_unique<Ort::Session>(ort_env_,
+        embed_path.c_str(), session_opts);
+
+    // Load cache initializer
+    std::string cache_path = model_dir_ + "/NLLB_cache_initializer.onnx";
+    cache_init_session_ = std::make_unique<Ort::Session>(ort_env_,
+        cache_path.c_str(), session_opts);
+}
+
+std::string NLLBTranslator::get_nllb_language_code(const std::string& lang_code) const {
+    auto it = nllb_language_codes_.find(lang_code);
+    if (it == nllb_language_codes_.end()) {
+        throw std::runtime_error("Unsupported language code: " + lang_code);
+    }
+    return it->second;
+}
+
+NLLBTranslator::TokenizerOutput NLLBTranslator::tokenize(
+    const std::string& text,
+    const std::string& source_lang,
+    const std::string& target_lang) const {
+    // TODO: Implement SentencePiece tokenization
+    // This is a placeholder implementation
+    TokenizerOutput output;
+    return output;
+}
+
+std::vector<float> NLLBTranslator::run_encoder(const TokenizerOutput& tokens) const {
+    // Prepare input tensors
+    std::vector<int64_t> input_shape = {1, static_cast<int64_t>(tokens.input_ids.size())};
+    
+    Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
+        OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
+        
+    Ort::Value input_ids_tensor = Ort::Value::CreateTensor<int64_t>(
+        memory_info, tokens.input_ids.data(), tokens.input_ids.size(), 
+        input_shape.data(), input_shape.size());
+        
+    Ort::Value attention_mask_tensor = Ort::Value::CreateTensor<int64_t>(
+        memory_info, tokens.attention_mask.data(), tokens.attention_mask.size(),
+        input_shape.data(), input_shape.size());
+
+    // Run encoder
+    const char* input_names[] = {"input_ids", "attention_mask"};
+    const char* output_names[] = {"encoder_output"};
+    
+    auto output_tensors = encoder_session_->Run(
+        Ort::RunOptions{nullptr},
+        input_names, 
+        {input_ids_tensor, attention_mask_tensor},
+        2,
+        output_names,
+        1);
+
+    // Get output data
+    float* output_data = output_tensors[0].GetTensorMutableData<float>();
+    size_t output_size = output_tensors[0].GetTensorTypeAndShapeInfo().GetElementCount();
+    
+    return std::vector<float>(output_data, output_data + output_size);
+}
+
+std::string NLLBTranslator::run_decoder(
+    const std::vector<float>& encoder_output,
+    const std::string& target_lang) const {
+    // TODO: Implement decoder logic
+    // This is a placeholder implementation
+    return "";
+}
+
+std::string NLLBTranslator::translate(
+    const std::string& text,
+    const std::string& source_lang) const {
+    try {
+        // Convert language codes
+        std::string nllb_source = get_nllb_language_code(source_lang);
+        std::string nllb_target = get_nllb_language_code(target_lang_);
+
+        // Tokenize input
+        auto tokens = tokenize(text, nllb_source, nllb_target);
+
+        // Run encoder
+        auto encoder_output = run_encoder(tokens);
+
+        // Run decoder
+        return run_decoder(encoder_output, nllb_target);
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Translation failed: " + std::string(e.what()));
     }
 }
 
 std::string NLLBTranslator::get_target_language() const {
     return target_lang_;
-}
-
-bool NLLBTranslator::needs_translation(const std::string& source_lang) const {
-    return source_lang != target_lang_;
-}
-
-NLLBTranslator::HttpResponse NLLBTranslator::send_post_request(const std::string& json_data) const {
-    std::string response_data;
-    long response_code = 0;
-
-    curl_easy_reset(curl_);
-    
-    struct curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    
-    curl_easy_setopt(curl_, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl_, CURLOPT_URL, (host_ + path_).c_str());
-    curl_easy_setopt(curl_, CURLOPT_PORT, port_);
-    curl_easy_setopt(curl_, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl_, CURLOPT_POSTFIELDS, json_data.c_str());
-    curl_easy_setopt(curl_, CURLOPT_WRITEFUNCTION, WriteCallback);
-    curl_easy_setopt(curl_, CURLOPT_WRITEDATA, &response_data);
-    
-    CURLcode res = curl_easy_perform(curl_);
-    curl_slist_free_all(headers);
-    
-    if (res != CURLE_OK) {
-        throw std::runtime_error(std::string("CURL request failed: ") + curl_easy_strerror(res));
-    }
-    
-    curl_easy_getinfo(curl_, CURLINFO_RESPONSE_CODE, &response_code);
-    
-    return HttpResponse{static_cast<int>(response_code), response_data};
-}
-
-std::string NLLBTranslator::convert_to_nllb_lang_code(const std::string& lang_code) const {
-    // NLLB uses specific language codes, here's a basic mapping
-    // You may need to expand this based on NLLB's supported languages
-    static const std::unordered_map<std::string, std::string> lang_map = {
-        {"en", "eng_Latn"},
-        {"zh", "zho_Hans"},
-        {"fr", "fra_Latn"},
-        {"de", "deu_Latn"},
-        {"es", "spa_Latn"},
-        {"ru", "rus_Cyrl"},
-        {"ja", "jpn_Jpan"},
-        {"ko", "kor_Hang"}
-        // Add more mappings as needed
-    };
-
-    auto it = lang_map.find(lang_code);
-    if (it != lang_map.end()) {
-        return it->second;
-    }
-    
-    // If no mapping found, return original code
-    // You might want to throw an exception instead
-    return lang_code;
 }
 
 } // namespace nllb 
