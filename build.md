@@ -17,7 +17,7 @@
 # 安装依赖包
 vcpkg install curl:x64-windows yaml-cpp:x64-windows nlohmann-json:x64-windows gtest:x64-windows
 # C:\Users\boringsoft\code\microsoft\vcpkg\vcpkg.exe install --triplet=x64-windows
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=C:/Users/boringsoft/code/microsoft/vcpkg/scripts/buildsystems/vcpkg.cmake
+# cmake -B build -S . -DCMAKE_INSTALL_PREFIX="./vcpkg_installed/x64-windows"
 ```
 
 ```bash

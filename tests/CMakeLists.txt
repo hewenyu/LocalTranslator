@@ -1,60 +1,42 @@
-cmake_minimum_required(VERSION 3.10)
-
-# 启用测试
 enable_testing()
 
-# 查找 GTest 包
-find_package(GTest REQUIRED)
+# 翻译器测试
+add_executable(translator_test
+    translator_test.cpp
+)
 
-# 添加测试可执行文件
-add_executable(translator_test translator_test.cpp)
-add_executable(nllb_translator_test nllb_translator_test.cpp)
-
-# 链接 GTest 和项目库
 target_link_libraries(translator_test
     PRIVATE
-    GTest::GTest
-    GTest::Main
     translator
+    GTest::gtest
+    GTest::gtest_main
+    benchmark::benchmark
+    sentencepiece
 )
 
-target_link_libraries(nllb_translator_test
+# NLLB性能测试
+add_executable(nllb_translator_benchmark
+    nllb_translator_benchmark.cpp
+)
+
+target_link_libraries(nllb_translator_benchmark
     PRIVATE
     translator
-    GTest::GTest
-    GTest::Main
-    spdlog::spdlog
-    yaml-cpp::yaml-cpp
+    benchmark::benchmark
+    benchmark::benchmark_main
+    sentencepiece
 )
-
-# 复制 DLL 到输出目录
-if(WIN32)
-    # 设置 DLL 源目录
-    set(DLL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/x64-windows/bin")
-    set(DLL_DEBUG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/x64-windows/debug/bin")
-    
-    # 复制 Debug DLLs
-    file(GLOB DEBUG_DLLS "${DLL_DEBUG_DIR}/*.dll")
-    file(COPY ${DEBUG_DLLS} DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/Debug")
-    
-    # 为测试目标设置工作目录
-    set_target_properties(translator_test PROPERTIES
-        VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Debug"
-    )
-    set_target_properties(nllb_translator_test PROPERTIES
-        VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Debug"
-    )
-endif()
 
 # 添加测试
-add_test(
-    NAME TranslatorTest
-    COMMAND translator_test
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Debug"
-)
+add_test(NAME translator_test COMMAND translator_test)
 
-add_test(
-    NAME NLLBTranslatorTest
-    COMMAND nllb_translator_test
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Debug"
-) 
+# Windows下复制依赖DLL到测试目录
+if(WIN32)
+    foreach(TARGET translator_test nllb_translator_benchmark)
+        add_custom_command(TARGET ${TARGET} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ONNXRUNTIME_DLL}"
+            $<TARGET_FILE_DIR:${TARGET}>
+        )
+    endforeach()
+endif() 
