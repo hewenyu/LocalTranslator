@@ -11,6 +11,15 @@
 
 namespace nllb {
 
+// Helper function to convert string to wstring
+static std::wstring to_wstring(const std::string& str) {
+    if (str.empty()) return std::wstring();
+    int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
+    std::wstring wstr(size_needed, 0);
+    MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstr[0], size_needed);
+    return wstr;
+}
+
 ModelConfig ModelConfig::load_from_yaml(const std::string& config_path) {
     try {
         YAML::Node config = YAML::LoadFile(config_path);
@@ -102,27 +111,31 @@ void NLLBTranslator::load_models() {
 
         // Load encoder
         std::string encoder_path = model_dir_ + "/NLLB_encoder.onnx";
+        std::wstring w_encoder_path = to_wstring(encoder_path);
         encoder_session_ = std::make_unique<Ort::Session>(ort_env_, 
-            encoder_path.c_str(), session_opts);
+            w_encoder_path.c_str(), session_opts);
         spdlog::info("Loaded encoder model: {}", encoder_path);
 
         // Load decoder
         std::string decoder_path = model_dir_ + "/NLLB_decoder.onnx";
+        std::wstring w_decoder_path = to_wstring(decoder_path);
         decoder_session_ = std::make_unique<Ort::Session>(ort_env_,
-            decoder_path.c_str(), session_opts);
+            w_decoder_path.c_str(), session_opts);
         spdlog::info("Loaded decoder model: {}", decoder_path);
 
         // Load embed and lm head
         std::string embed_path = model_dir_ + "/NLLB_embed_and_lm_head.onnx";
+        std::wstring w_embed_path = to_wstring(embed_path);
         embed_lm_head_session_ = std::make_unique<Ort::Session>(ort_env_,
-            embed_path.c_str(), session_opts);
+            w_embed_path.c_str(), session_opts);
         spdlog::info("Loaded embedding model: {}", embed_path);
 
         // Load cache initializer if using cache
         if (params_.use_cache) {
             std::string cache_path = model_dir_ + "/NLLB_cache_initializer.onnx";
+            std::wstring w_cache_path = to_wstring(cache_path);
             cache_init_session_ = std::make_unique<Ort::Session>(ort_env_,
-                cache_path.c_str(), session_opts);
+                w_cache_path.c_str(), session_opts);
             spdlog::info("Loaded cache initializer: {}", cache_path);
         }
     } catch (const std::exception& e) {
