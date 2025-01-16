@@ -177,6 +177,21 @@ void NLLBTranslator::load_models() {
             w_decoder_path.c_str(), session_opts);
         spdlog::info("Loaded decoder model: {}", decoder_path);
 
+        // Print decoder info
+        size_t decoder_input_nodes = decoder_session_->GetInputCount();
+        spdlog::info("Decoder input nodes: {}", decoder_input_nodes);
+        for (size_t i = 0; i < decoder_input_nodes; i++) {
+            auto input_name = decoder_session_->GetInputNameAllocated(i, allocator);
+            spdlog::info("Decoder input {}: {}", i, input_name.get());
+        }
+
+        size_t decoder_output_nodes = decoder_session_->GetOutputCount();
+        spdlog::info("Decoder output nodes: {}", decoder_output_nodes);
+        for (size_t i = 0; i < decoder_output_nodes; i++) {
+            auto output_name = decoder_session_->GetOutputNameAllocated(i, allocator);
+            spdlog::info("Decoder output {}: {}", i, output_name.get());
+        }
+
         // Load cache initializer if using cache
         if (params_.use_cache) {
             std::string cache_path = model_dir_ + "/NLLB_cache_initializer.onnx";
