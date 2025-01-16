@@ -69,14 +69,24 @@ vcpkg install yaml-cpp:x64-linux
 ### 3. Environment Configuration
 
 #### Windows
-Add the following path to your system's PATH environment variable:
+Add the following paths to your system's PATH environment variable:
 ```
 C:\Users\[YourUsername]\code\microsoft\vcpkg\installed\x64-windows\bin
+C:\Users\[YourUsername]\code\microsoft\vcpkg
+```
+
+Also, set a new system environment variable:
+```
+VCPKG_ROOT=C:\Users\[YourUsername]\code\microsoft\vcpkg
 ```
 
 #### Linux
 Add the following to your `~/.bashrc` or `~/.zshrc`:
 ```bash
+# Add vcpkg root to environment
+export VCPKG_ROOT=$HOME/vcpkg
+export PATH=$VCPKG_ROOT:$PATH
+# Add library path
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$HOME/vcpkg/installed/x64-linux/lib
 ```
 
