@@ -9,6 +9,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# SentencePiece configuration
+option(SPM_ENABLE_SHARED "Build SentencePiece shared library" OFF)
+option(SPM_ENABLE_TCMALLOC "Enable TCMalloc if available" OFF)
+add_subdirectory(dep/sentencepiece EXCLUDE_FROM_ALL)
+
 # Windows特定设置
 if(MSVC)
     add_compile_options(/utf-8)
@@ -23,10 +28,13 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # vcpkg集成
-if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
-    set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-        CACHE STRING "")
-endif()
+set(CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows")
+list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/lib")
+list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/lib/manual-link")
+
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/vcpkg_installed/vcpkg/scripts/buildsystems/vcpkg.cmake"
+    CACHE STRING "Vcpkg toolchain file")
+set(VCPKG_TARGET_TRIPLET "x64-windows" CACHE STRING "Vcpkg target triplet")
 
 # 查找依赖包
 find_package(CURL REQUIRED)
@@ -39,29 +47,6 @@ find_package(benchmark CONFIG REQUIRED)
 find_package(tinyxml2 CONFIG REQUIRED)
 find_package(protobuf CONFIG REQUIRED)
 find_package(absl CONFIG REQUIRED)
-
-# 查找sentencepiece
-if(WIN32)
-    find_library(SENTENCEPIECE_LIB
-        NAMES sentencepiece
-        PATHS "$ENV{VCPKG_ROOT}/installed/x64-windows/lib"
-        REQUIRED
-    )
-    find_path(SENTENCEPIECE_INCLUDE_DIR
-        NAMES sentencepiece_processor.h
-        PATHS "$ENV{VCPKG_ROOT}/installed/x64-windows/include"
-        REQUIRED
-    )
-else()
-    find_library(SENTENCEPIECE_LIB
-        NAMES sentencepiece
-        REQUIRED
-    )
-    find_path(SENTENCEPIECE_INCLUDE_DIR
-        NAMES sentencepiece_processor.h
-        REQUIRED
-    )
-endif()
 
 # ONNX Runtime设置
 if(WIN32)
@@ -98,7 +83,7 @@ target_link_libraries(${PROJECT_NAME}
     absl::hash
     absl::flat_hash_map
     absl::flat_hash_set
-    ${SENTENCEPIECE_LIB}
+    sentencepiece-static
 )
 
 # 包含目录
@@ -106,7 +91,8 @@ target_include_directories(${PROJECT_NAME}
     PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${ONNXRUNTIME_ROOT}/include
-    ${SENTENCEPIECE_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}/dep/sentencepiece/src
+    ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/include
 )
 
 # Windows下复制DLL到输出目录
@@ -120,7 +106,7 @@ if(WIN32)
     # 复制其他依赖DLL
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "$ENV{VCPKG_ROOT}/installed/x64-windows/bin"
+        "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/bin"
         $<TARGET_FILE_DIR:${PROJECT_NAME}>
     )
 endif() 

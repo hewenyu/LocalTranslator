@@ -6,7 +6,6 @@
     "curl",
     "nlohmann-json",
     "gtest",
-    "sentencepiece",
     "spdlog",
     "benchmark",
     "tinyxml2",

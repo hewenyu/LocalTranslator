@@ -11,7 +11,12 @@ target_link_libraries(translator_test
     GTest::gtest
     GTest::gtest_main
     benchmark::benchmark
-    sentencepiece
+    ${SENTENCEPIECE_LIB}
+)
+
+target_include_directories(translator_test
+    PRIVATE
+    ${SENTENCEPIECE_INCLUDE_DIR}
 )
 
 # NLLB性能测试
@@ -24,7 +29,12 @@ target_link_libraries(nllb_translator_benchmark
     translator
     benchmark::benchmark
     benchmark::benchmark_main
-    sentencepiece
+    ${SENTENCEPIECE_LIB}
+)
+
+target_include_directories(nllb_translator_benchmark
+    PRIVATE
+    ${SENTENCEPIECE_INCLUDE_DIR}
 )
 
 # 添加测试
@@ -36,6 +46,13 @@ if(WIN32)
         add_custom_command(TARGET ${TARGET} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${ONNXRUNTIME_DLL}"
+            $<TARGET_FILE_DIR:${TARGET}>
+        )
+
+        # 复制其他依赖DLL
+        add_custom_command(TARGET ${TARGET} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "$ENV{VCPKG_ROOT}/installed/x64-windows/bin"
             $<TARGET_FILE_DIR:${TARGET}>
         )
     endforeach()
