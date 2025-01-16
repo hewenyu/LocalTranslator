@@ -24,7 +24,7 @@ target_link_libraries(nllb_translator_test
     GTest::GTest
     GTest::Main
     spdlog::spdlog
-    yaml-cpp
+    yaml-cpp::yaml-cpp
 )
 
 # 复制 DLL 到输出目录
@@ -32,10 +32,6 @@ if(WIN32)
     # 设置 DLL 源目录
     set(DLL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/x64-windows/bin")
     set(DLL_DEBUG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/x64-windows/debug/bin")
-    
-    # 复制 Release DLLs
-    file(GLOB RELEASE_DLLS "${DLL_SOURCE_DIR}/*.dll")
-    file(COPY ${RELEASE_DLLS} DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/Debug")
     
     # 复制 Debug DLLs
     file(GLOB DEBUG_DLLS "${DLL_DEBUG_DIR}/*.dll")

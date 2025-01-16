@@ -43,8 +43,15 @@ find_package(nlohmann_json REQUIRED)
 find_package(GTest REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 
+
 # 查找 sentencepiece
 if(WIN32)
+    find_package(protobuf 
+        PATHS ${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/x64-windows/lib 
+        REQUIRED)
+    find_package(absl 
+        PATHS ${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/x64-windows/lib 
+        REQUIRED)
     find_library(SENTENCEPIECE_LIB sentencepiece 
         PATHS ${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/x64-windows/lib
         REQUIRED)
@@ -52,6 +59,12 @@ if(WIN32)
         PATHS ${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/x64-windows/lib
         REQUIRED)
 else()
+    find_package(protobuf 
+        PATHS ${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/x64-linux/lib 
+        REQUIRED)
+    find_package(absl 
+        PATHS ${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/x64-linux/lib 
+        REQUIRED)
     find_library(SENTENCEPIECE_LIB sentencepiece
         PATHS ${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/x64-linux/lib
         REQUIRED)
@@ -65,6 +78,8 @@ add_library(translator
     translator/translator.cpp
     translator/deeplx/deeplx_translator.cpp
     translator/nllb-api/nllb_translator.cpp
+    translator/nllb-api/beam_search.cpp
+    translator/nllb-api/tokenizer.cpp
 )
 
 # 设置包含目录
@@ -85,6 +100,20 @@ target_link_libraries(translator
     spdlog::spdlog
     ${SENTENCEPIECE_LIB}
     ${ONNXRUNTIME_LIB}
+    protobuf::libprotobuf
+    absl::base
+    absl::strings
+    absl::hash
+    absl::raw_hash_set
+    absl::container_common
+    absl::flags
+    absl::flags_internal
+    absl::flags_reflection
+    absl::flags_marshalling
+    absl::flags_commandlineflag
+    absl::flags_private_handle_accessor
+    absl::flags_config
+    absl::flags_program_name
 )
 
 # 添加可执行文件
