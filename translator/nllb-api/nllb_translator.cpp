@@ -376,13 +376,13 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
                         auto decoder_key = Ort::Value::CreateTensor<float>(memory_info,
                             empty_kv.data(), empty_kv.size(), kv_shape.data(), kv_shape.size());
                         cache.update_decoder_key(layer, std::move(decoder_key));
-                        decoder_inputs.push_back(cache.get_decoder_key(layer).value());
+                        decoder_inputs.push_back(std::move(cache.get_decoder_key(layer).value()));
                         
                         // 创建decoder value tensor
                         auto decoder_value = Ort::Value::CreateTensor<float>(memory_info,
                             empty_kv.data(), empty_kv.size(), kv_shape.data(), kv_shape.size());
                         cache.update_decoder_value(layer, std::move(decoder_value));
-                        decoder_inputs.push_back(cache.get_decoder_value(layer).value());
+                        decoder_inputs.push_back(std::move(cache.get_decoder_value(layer).value()));
                         
                         // 使用encoder的present值
                         std::array<int64_t, 4> encoder_kv_shape{1, model_config_.num_heads, 
@@ -395,19 +395,19 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
                         auto encoder_key = Ort::Value::CreateTensor<float>(memory_info,
                             encoder_kv.data(), encoder_kv.size(), encoder_kv_shape.data(), encoder_kv_shape.size());
                         cache.update_encoder_key(layer, std::move(encoder_key));
-                        decoder_inputs.push_back(cache.get_encoder_key(layer).value());
+                        decoder_inputs.push_back(std::move(cache.get_encoder_key(layer).value()));
                         
                         // 创建encoder value tensor
                         auto encoder_value = Ort::Value::CreateTensor<float>(memory_info,
                             encoder_kv.data(), encoder_kv.size(), encoder_kv_shape.data(), encoder_kv_shape.size());
                         cache.update_encoder_value(layer, std::move(encoder_value));
-                        decoder_inputs.push_back(cache.get_encoder_value(layer).value());
+                        decoder_inputs.push_back(std::move(cache.get_encoder_value(layer).value()));
                     } else {
                         // 后续迭代：使用上一次的present值
-                        decoder_inputs.push_back(cache.get_decoder_key(layer).value());
-                        decoder_inputs.push_back(cache.get_decoder_value(layer).value());
-                        decoder_inputs.push_back(cache.get_encoder_key(layer).value());
-                        decoder_inputs.push_back(cache.get_encoder_value(layer).value());
+                        decoder_inputs.push_back(std::move(cache.get_decoder_key(layer).value()));
+                        decoder_inputs.push_back(std::move(cache.get_decoder_value(layer).value()));
+                        decoder_inputs.push_back(std::move(cache.get_encoder_key(layer).value()));
+                        decoder_inputs.push_back(std::move(cache.get_encoder_value(layer).value()));
                     }
                 }
                 
