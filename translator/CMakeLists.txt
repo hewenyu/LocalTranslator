@@ -11,7 +11,7 @@ target_include_directories(translator
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}
     ${ONNXRUNTIME_ROOT}/include
-    ${SENTENCEPIECE_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}/dep/sentencepiece/src
 )
 
 target_link_libraries(translator
@@ -29,5 +29,5 @@ target_link_libraries(translator
     absl::flat_hash_map
     absl::flat_hash_set
     ${ONNXRUNTIME_LIB}
-    ${SENTENCEPIECE_LIB}
+    sentencepiece-static
 ) 

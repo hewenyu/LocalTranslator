@@ -9,24 +9,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# SentencePiece configuration
-option(SPM_ENABLE_SHARED "Build SentencePiece shared library" OFF)
-option(SPM_ENABLE_TCMALLOC "Enable TCMalloc if available" OFF)
-add_subdirectory(dep/sentencepiece EXCLUDE_FROM_ALL)
-
-# Windows特定设置
-if(MSVC)
-    add_compile_options(/utf-8)
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
-    set(CMAKE_CXX_FLAGS_RELEASE "/MD /O2 /Ob2 /DNDEBUG")
-    set(CMAKE_CXX_FLAGS_DEBUG "/MDd /Zi /Ob0 /Od /RTC1")
-endif()
-
-# 设置输出目录
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-
 # vcpkg集成
 set(CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows")
 list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/lib")
@@ -47,6 +29,25 @@ find_package(benchmark CONFIG REQUIRED)
 find_package(tinyxml2 CONFIG REQUIRED)
 find_package(protobuf CONFIG REQUIRED)
 find_package(absl CONFIG REQUIRED)
+
+# SentencePiece configuration
+option(SPM_ENABLE_SHARED "Build SentencePiece shared library" OFF)
+option(SPM_ENABLE_TCMALLOC "Enable TCMalloc if available" OFF)
+option(SPM_USE_BUILTIN_PROTOBUF "Use built-in protobuf" OFF)
+add_subdirectory(dep/sentencepiece EXCLUDE_FROM_ALL)
+
+# Windows特定设置
+if(MSVC)
+    add_compile_options(/utf-8)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    set(CMAKE_CXX_FLAGS_RELEASE "/MD /O2 /Ob2 /DNDEBUG")
+    set(CMAKE_CXX_FLAGS_DEBUG "/MDd /Zi /Ob0 /Od /RTC1")
+endif()
+
+# 设置输出目录
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # ONNX Runtime设置
 if(WIN32)

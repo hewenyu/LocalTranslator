@@ -1,6 +1,6 @@
 @echo off
 
-cmd /c "rmdir /s /q build && cmake -B build -S . -DCMAKE_INSTALL_PREFIX="./onnxruntime/onnxruntime-win-x64"
+cmd /c "rmdir /s /q build && cmake -B build -S .
 
 echo Building project...
 cmake --build build
