@@ -11,31 +11,21 @@
 
 namespace nllb {
 
-// 模型配置结构
-struct ModelConfig {
-    int hidden_size;
-    int num_heads;
-    int vocab_size;
-    int max_position_embeddings;
-    int encoder_layers;
-    int decoder_layers;
-
-    static ModelConfig load_from_yaml(const std::string& config_path) {
-        try {
-            YAML::Node config = YAML::LoadFile(config_path);
-            ModelConfig model_config;
-            model_config.hidden_size = config["hidden_size"].as<int>();
-            model_config.num_heads = config["num_heads"].as<int>();
-            model_config.vocab_size = config["vocab_size"].as<int>();
-            model_config.max_position_embeddings = config["max_position_embeddings"].as<int>();
-            model_config.encoder_layers = config["encoder_layers"].as<int>();
-            model_config.decoder_layers = config["decoder_layers"].as<int>();
-            return model_config;
-        } catch (const std::exception& e) {
-            throw std::runtime_error("Failed to load model config: " + std::string(e.what()));
-        }
+ModelConfig ModelConfig::load_from_yaml(const std::string& config_path) {
+    try {
+        YAML::Node config = YAML::LoadFile(config_path);
+        ModelConfig model_config;
+        model_config.hidden_size = config["hidden_size"].as<int>();
+        model_config.num_heads = config["num_heads"].as<int>();
+        model_config.vocab_size = config["vocab_size"].as<int>();
+        model_config.max_position_embeddings = config["max_position_embeddings"].as<int>();
+        model_config.encoder_layers = config["encoder_layers"].as<int>();
+        model_config.decoder_layers = config["decoder_layers"].as<int>();
+        return model_config;
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Failed to load model config: " + std::string(e.what()));
     }
-};
+}
 
 NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config) 
     : ort_env_(ORT_LOGGING_LEVEL_WARNING, "nllb_translator") {
@@ -198,7 +188,11 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
 
     try {
         // 创建缓存状态
-        CacheState cache(params_.max_length, model_config_.hidden_size, model_config_.num_heads);
+        CacheState cache(
+            params_.max_length,
+            model_config_.hidden_size,
+            model_config_.num_heads
+        );
 
         // 定义单步解码函数
         auto step_function = [this, &encoder_output](

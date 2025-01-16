@@ -5,32 +5,10 @@
 #include <map>
 #include "translator/translator.h"
 #include "translator/nllb-api/tokenizer.h"
+#include "translator/nllb-api/beam_search.h"
 #include <onnxruntime_cxx_api.h>
 
 namespace nllb {
-
-class BeamSearchDecoder;
-
-struct BeamSearchConfig {
-    int beam_size;
-    int max_length;
-    float length_penalty;
-    float eos_penalty;
-    int num_return_sequences;
-    float temperature;
-    int top_k;
-    float top_p;
-    float repetition_penalty;
-
-    BeamSearchConfig(int beam_size, int max_length, float length_penalty,
-                    float eos_penalty, int num_return_sequences,
-                    float temperature, int top_k, float top_p,
-                    float repetition_penalty)
-        : beam_size(beam_size), max_length(max_length), length_penalty(length_penalty),
-          eos_penalty(eos_penalty), num_return_sequences(num_return_sequences),
-          temperature(temperature), top_k(top_k), top_p(top_p),
-          repetition_penalty(repetition_penalty) {}
-};
 
 struct ModelConfig {
     int hidden_size;
