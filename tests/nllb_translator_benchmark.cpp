@@ -1,5 +1,6 @@
 #include <benchmark/benchmark.h>
 #include <filesystem>
+#include <fstream>
 #include "translator/nllb-api/nllb_translator.h"
 
 namespace {
