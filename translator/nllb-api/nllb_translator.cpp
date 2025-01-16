@@ -146,32 +146,17 @@ std::vector<float> NLLBTranslator::run_encoder(const Tokenizer::TokenizerOutput&
     auto start_time = std::chrono::high_resolution_clock::now();
 
     try {
-        // Prepare input tensors
-        std::vector<int64_t> input_shape = {1, static_cast<int64_t>(tokens.input_ids.size())};
-        size_t total_elements = 1 * tokens.input_ids.size();  // Calculate total elements from shape
+        constexpr size_t max_sequence_length = 512;  // Maximum sequence length
+        std::array<int64_t, 2> input_shape{1, static_cast<int64_t>(tokens.input_ids.size())};
         
-        auto memory_info = Ort::MemoryInfo::CreateCpu(
-            OrtArenaAllocator, OrtMemTypeDefault);
+        auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
             
-        // Create mutable copies of the data
-        std::vector<int64_t> input_ids(tokens.input_ids.begin(), tokens.input_ids.end());
-        std::vector<int64_t> attention_mask(tokens.attention_mask.begin(), tokens.attention_mask.end());
+        // Create input tensors
+        auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(memory_info, const_cast<int64_t*>(tokens.input_ids.data()), 
+                                                                 tokens.input_ids.size(), input_shape.data(), input_shape.size());
             
-        auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(
-            memory_info,
-            input_ids.data(),
-            total_elements,
-            input_shape.data(),
-            input_shape.size()
-        );
-            
-        auto attention_mask_tensor = Ort::Value::CreateTensor<int64_t>(
-            memory_info,
-            attention_mask.data(),
-            total_elements,
-            input_shape.data(),
-            input_shape.size()
-        );
+        auto attention_mask_tensor = Ort::Value::CreateTensor<int64_t>(memory_info, const_cast<int64_t*>(tokens.attention_mask.data()),
+                                                                      tokens.attention_mask.size(), input_shape.data(), input_shape.size());
 
         // Run encoder
         const char* input_names[] = {"input_ids", "attention_mask"};
@@ -221,20 +206,26 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
             const CacheState& cache) -> std::vector<float> {
             
             // 准备输入张量
-            Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
-                OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
-
-            // 准备decoder输入
-            std::vector<int64_t> input_shape = {1, static_cast<int64_t>(tokens.size())};
+            auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
+            std::array<int64_t, 2> input_shape{1, static_cast<int64_t>(tokens.size())};
+            
             auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(
-                memory_info, tokens.data(), tokens.size(), 
-                input_shape.data(), input_shape.size());
+                memory_info,
+                tokens.data(),
+                tokens.size(),
+                input_shape.data(),
+                input_shape.size()
+            );
 
             // 准备encoder输出
-            std::vector<int64_t> encoder_shape = {1, static_cast<int64_t>(encoder_output.size())};
+            std::array<int64_t, 2> encoder_shape{1, static_cast<int64_t>(encoder_output.size())};
             auto encoder_tensor = Ort::Value::CreateTensor<float>(
-                memory_info, encoder_output.data(), encoder_output.size(),
-                encoder_shape.data(), encoder_shape.size());
+                memory_info,
+                encoder_output.data(),
+                encoder_output.size(),
+                encoder_shape.data(),
+                encoder_shape.size()
+            );
 
             // 运行decoder
             const char* input_names[] = {"input_ids", "encoder_output"};
@@ -253,7 +244,7 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
             );
 
             // 获取logits
-            float* logits_data = static_cast<float*>(output_tensors[0].GetTensorMutableData());
+            float* logits_data = output_tensors[0].GetTensorMutableData<float>();
             size_t vocab_size = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape()[2];
             
             // 计算最后一个token的概率分布
