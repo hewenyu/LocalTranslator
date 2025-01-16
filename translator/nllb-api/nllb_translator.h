@@ -4,6 +4,7 @@
 #include <memory>
 #include <map>
 #include "translator/translator.h"
+#include "translator/nllb-api/tokenizer.h"
 #include <onnxruntime_cxx_api.h>
 
 namespace nllb {
@@ -24,9 +25,13 @@ private:
     std::unique_ptr<Ort::Session> embed_lm_head_session_;
     std::unique_ptr<Ort::Session> cache_init_session_;
 
-    // Model paths
+    // Tokenizer
+    std::unique_ptr<Tokenizer> tokenizer_;
+
+    // Model paths and config
     std::string model_dir_;
     std::string target_lang_;
+    common::NLLBConfig::Parameters params_;
     
     // Language code mappings
     std::map<std::string, std::string> nllb_language_codes_;
@@ -36,19 +41,10 @@ private:
     std::string get_nllb_language_code(const std::string& lang_code) const;
     void load_models();
     
-    // Tokenization and model inference
-    struct TokenizerOutput {
-        std::vector<int64_t> input_ids;
-        std::vector<int64_t> attention_mask;
-    };
-    
-    TokenizerOutput tokenize(const std::string& text, 
-                           const std::string& source_lang, 
-                           const std::string& target_lang) const;
-                           
-    std::vector<float> run_encoder(const TokenizerOutput& tokens) const;
-    std::string run_decoder(const std::vector<float>& encoder_output,
-                          const std::string& target_lang) const;
+    // Model inference
+    std::vector<float> run_encoder(const Tokenizer::TokenizerOutput& tokens) const;
+    std::vector<int64_t> run_decoder(const std::vector<float>& encoder_output,
+                                   const std::string& target_lang) const;
 };
 
 } // namespace nllb 

@@ -10,10 +10,15 @@ NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config)
     : ort_env_(ORT_LOGGING_LEVEL_WARNING, "nllb_translator") {
     model_dir_ = config.nllb.model_dir;
     target_lang_ = config.nllb.target_lang;
+    params_ = config.nllb.params;
     
-    // Initialize
+    // Initialize components
     initialize_language_codes();
     load_models();
+    
+    // Initialize tokenizer
+    std::string vocab_path = model_dir_ + "/" + config.nllb.model_files.tokenizer_vocab;
+    tokenizer_ = std::make_unique<Tokenizer>(vocab_path);
 }
 
 NLLBTranslator::~NLLBTranslator() = default;
@@ -35,7 +40,7 @@ void NLLBTranslator::initialize_language_codes() {
 
 void NLLBTranslator::load_models() {
     Ort::SessionOptions session_opts;
-    session_opts.SetIntraOpNumThreads(1);
+    session_opts.SetIntraOpNumThreads(params_.num_threads);
     session_opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
 
     // Load encoder
@@ -53,10 +58,12 @@ void NLLBTranslator::load_models() {
     embed_lm_head_session_ = std::make_unique<Ort::Session>(ort_env_,
         embed_path.c_str(), session_opts);
 
-    // Load cache initializer
-    std::string cache_path = model_dir_ + "/NLLB_cache_initializer.onnx";
-    cache_init_session_ = std::make_unique<Ort::Session>(ort_env_,
-        cache_path.c_str(), session_opts);
+    // Load cache initializer if using cache
+    if (params_.use_cache) {
+        std::string cache_path = model_dir_ + "/NLLB_cache_initializer.onnx";
+        cache_init_session_ = std::make_unique<Ort::Session>(ort_env_,
+            cache_path.c_str(), session_opts);
+    }
 }
 
 std::string NLLBTranslator::get_nllb_language_code(const std::string& lang_code) const {
@@ -67,17 +74,7 @@ std::string NLLBTranslator::get_nllb_language_code(const std::string& lang_code)
     return it->second;
 }
 
-NLLBTranslator::TokenizerOutput NLLBTranslator::tokenize(
-    const std::string& text,
-    const std::string& source_lang,
-    const std::string& target_lang) const {
-    // TODO: Implement SentencePiece tokenization
-    // This is a placeholder implementation
-    TokenizerOutput output;
-    return output;
-}
-
-std::vector<float> NLLBTranslator::run_encoder(const TokenizerOutput& tokens) const {
+std::vector<float> NLLBTranslator::run_encoder(const Tokenizer::TokenizerOutput& tokens) const {
     // Prepare input tensors
     std::vector<int64_t> input_shape = {1, static_cast<int64_t>(tokens.input_ids.size())};
     
@@ -111,12 +108,28 @@ std::vector<float> NLLBTranslator::run_encoder(const TokenizerOutput& tokens) co
     return std::vector<float>(output_data, output_data + output_size);
 }
 
-std::string NLLBTranslator::run_decoder(
+std::vector<int64_t> NLLBTranslator::run_decoder(
     const std::vector<float>& encoder_output,
     const std::string& target_lang) const {
-    // TODO: Implement decoder logic
-    // This is a placeholder implementation
-    return "";
+    std::vector<int64_t> output_ids;
+    output_ids.push_back(tokenizer_->bos_id());  // Start with BOS token
+
+    // Initialize cache if using it
+    std::vector<Ort::Value> cache_states;
+    if (params_.use_cache && cache_init_session_) {
+        // TODO: Initialize cache states
+    }
+
+    // Beam search parameters
+    const int beam_size = params_.beam_size;
+    const int max_length = params_.max_length;
+    const float length_penalty = params_.length_penalty;
+
+    // TODO: Implement beam search decoding
+    // For now, just return a simple sequence
+    output_ids.push_back(tokenizer_->eos_id());
+    
+    return output_ids;
 }
 
 std::string NLLBTranslator::translate(
@@ -128,13 +141,16 @@ std::string NLLBTranslator::translate(
         std::string nllb_target = get_nllb_language_code(target_lang_);
 
         // Tokenize input
-        auto tokens = tokenize(text, nllb_source, nllb_target);
+        auto tokens = tokenizer_->encode(text, nllb_source, nllb_target);
 
         // Run encoder
         auto encoder_output = run_encoder(tokens);
 
         // Run decoder
-        return run_decoder(encoder_output, nllb_target);
+        auto output_ids = run_decoder(encoder_output, nllb_target);
+
+        // Decode output tokens
+        return tokenizer_->decode(output_ids);
     } catch (const std::exception& e) {
         throw std::runtime_error("Translation failed: " + std::string(e.what()));
     }
