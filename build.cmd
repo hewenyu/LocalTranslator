@@ -2,14 +2,16 @@
 echo Cleaning build directory...
 if exist build rmdir /s /q build
 
+echo Creating build directory...
+mkdir build
+
 echo Configuring project...
-cmake -B build -S .
+cd build
+cmake .. -G "Visual Studio 17 2022" -A x64
 
 echo Building project...
-cmake --build build
+cmake --build . --config Release --target ALL_BUILD
 
-echo Running tests...
-cd build && ctest -C Debug --output-on-failure
+echo Build process completed.
 cd ..
 
-echo Build process completed. 
