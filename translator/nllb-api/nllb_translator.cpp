@@ -5,6 +5,9 @@
 #include <yaml-cpp/yaml.h>
 #include <spdlog/spdlog.h>
 #include "translator/nllb-api/nllb_translator.h"
+#include "translator/nllb-api/beam_search.h"
+#include <onnxruntime_cxx_api.h>
+#include <onnxruntime_c_api.h>
 
 namespace nllb {
 
@@ -63,16 +66,16 @@ NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config)
             params_.beam_size,
             params_.max_length,
             params_.length_penalty,
-            0.9f,  // EOS penalty
-            1,     // num return sequences
-            params_.temperature,
-            params_.top_k,
-            params_.top_p,
-            params_.repetition_penalty
+            0.9f,  // Default EOS penalty
+            1,     // Default num return sequences
+            1.0f,  // Default temperature
+            0,     // Default top_k (disabled)
+            0.9f,  // Default top_p
+            0.9f   // Default repetition penalty
         );
         
         // 创建beam search解码器
-        decoder_ = std::make_unique<BeamSearchDecoder>(beam_config_);
+        beam_search_decoder_ = std::make_unique<BeamSearchDecoder>(beam_config_);
         
         spdlog::info("NLLB translator initialization completed successfully");
     } catch (const std::exception& e) {
@@ -150,12 +153,20 @@ std::vector<float> NLLBTranslator::run_encoder(const Tokenizer::TokenizerOutput&
             OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
             
         Ort::Value input_ids_tensor = Ort::Value::CreateTensor<int64_t>(
-            memory_info, tokens.input_ids.data(), tokens.input_ids.size(), 
-            input_shape.data(), input_shape.size());
+            memory_info,
+            tokens.input_ids.data(),
+            tokens.input_ids.size(),
+            input_shape.data(),
+            input_shape.size()
+        );
             
         Ort::Value attention_mask_tensor = Ort::Value::CreateTensor<int64_t>(
-            memory_info, tokens.attention_mask.data(), tokens.attention_mask.size(),
-            input_shape.data(), input_shape.size());
+            memory_info,
+            tokens.attention_mask.data(),
+            tokens.attention_mask.size(),
+            input_shape.data(),
+            input_shape.size()
+        );
 
         // Run encoder
         const char* input_names[] = {"input_ids", "attention_mask"};
@@ -163,11 +174,12 @@ std::vector<float> NLLBTranslator::run_encoder(const Tokenizer::TokenizerOutput&
         
         auto output_tensors = encoder_session_->Run(
             Ort::RunOptions{nullptr},
-            input_names, 
-            {input_ids_tensor, attention_mask_tensor},
+            input_names,
+            std::array<Ort::Value, 2>{std::move(input_ids_tensor), std::move(attention_mask_tensor)}.data(),
             2,
             output_names,
-            1);
+            1
+        );
 
         // Get output data
         float* output_data = output_tensors[0].GetTensorMutableData<float>();
@@ -226,7 +238,8 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
                 {input_ids_tensor, encoder_tensor},
                 2,
                 output_names,
-                1);
+                1
+            );
 
             // 获取logits
             float* logits_data = output_tensors[0].GetTensorMutableData<float>();

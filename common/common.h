@@ -31,9 +31,13 @@ struct NLLBConfig {
     struct Parameters {
         int beam_size = 5;  // Beam search size
         int max_length = 128;  // Maximum sequence length
-        float length_penalty = 1.0;  // Length penalty for beam search
+        float length_penalty = 1.0f;  // Length penalty for beam search
         bool use_cache = true;  // Whether to use decoder cache
         int num_threads = 1;  // Number of threads for model inference
+        float temperature = 1.0f;  // Temperature for sampling
+        int top_k = 0;  // Top-k sampling parameter
+        float top_p = 0.9f;  // Top-p (nucleus) sampling parameter
+        float repetition_penalty = 0.9f;  // Penalty for repeated tokens
     } params;
 };
 

@@ -9,6 +9,40 @@
 
 namespace nllb {
 
+class BeamSearchDecoder;
+
+struct BeamSearchConfig {
+    int beam_size;
+    int max_length;
+    float length_penalty;
+    float eos_penalty;
+    int num_return_sequences;
+    float temperature;
+    int top_k;
+    float top_p;
+    float repetition_penalty;
+
+    BeamSearchConfig(int beam_size, int max_length, float length_penalty,
+                    float eos_penalty, int num_return_sequences,
+                    float temperature, int top_k, float top_p,
+                    float repetition_penalty)
+        : beam_size(beam_size), max_length(max_length), length_penalty(length_penalty),
+          eos_penalty(eos_penalty), num_return_sequences(num_return_sequences),
+          temperature(temperature), top_k(top_k), top_p(top_p),
+          repetition_penalty(repetition_penalty) {}
+};
+
+struct ModelConfig {
+    int hidden_size;
+    int num_heads;
+    int vocab_size;
+    int max_position_embeddings;
+    int encoder_layers;
+    int decoder_layers;
+
+    static ModelConfig load_from_yaml(const std::string& config_path);
+};
+
 class NLLBTranslator : public translator::ITranslator {
 public:
     explicit NLLBTranslator(const common::TranslatorConfig& config);
@@ -32,6 +66,9 @@ private:
     std::string model_dir_;
     std::string target_lang_;
     common::NLLBConfig::Parameters params_;
+    ModelConfig model_config_;
+    BeamSearchConfig beam_config_;
+    std::unique_ptr<BeamSearchDecoder> beam_search_decoder_;
     
     // Language code mappings
     std::map<std::string, std::string> nllb_language_codes_;

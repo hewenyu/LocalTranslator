@@ -12,7 +12,9 @@
                 "-o",
                 "${fileDirname}\\${fileBasenameNoExtension}.exe",
                 "-I", "C:/Users/boringsoft/code/microsoft/vcpkg/installed/x64-windows/include",
-                "-L", "C:/Users/boringsoft/code/microsoft/vcpkg/installed/x64-windows/lib"
+                "-L", "C:/Users/boringsoft/code/microsoft/vcpkg/installed/x64-windows/lib",
+                "-I", "C:/Users/boringsoft/code/hewenyu/LocalTranslator/onnxruntime/onnxruntime-win-x64/include",
+                "-L", "C:/Users/boringsoft/code/hewenyu/LocalTranslator/onnxruntime/onnxruntime-win-x64/lib"
             ],
             "options": {
                 "cwd": "${fileDirname}"
