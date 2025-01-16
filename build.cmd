@@ -1,17 +1,9 @@
 @echo off
-echo Cleaning build directory...
-if exist build rmdir /s /q build
 
-echo Creating build directory...
-mkdir build
-
-echo Configuring project...
-cd build
-cmake .. -G "Visual Studio 17 2022" -A x64
+cmd /c "rmdir /s /q build && cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=C:/Users/boringsoft/code/microsoft/vcpkg/scripts/buildsystems/vcpkg.cmake"
 
 echo Building project...
-cmake --build . --config Release --target ALL_BUILD
+cmake --build build
 
 echo Build process completed.
-cd ..
 
