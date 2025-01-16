@@ -1,0 +1,7 @@
+{
+  "name": "local-translator",
+  "version": "1.0.0",
+  "dependencies": [
+    "yaml-cpp"
+  ]
+} 
