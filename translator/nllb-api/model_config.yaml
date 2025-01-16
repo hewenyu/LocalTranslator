@@ -1,0 +1,25 @@
+# NLLB-200 3.3B model configuration
+hidden_size: 1024
+num_heads: 16
+vocab_size: 256200
+max_position_embeddings: 1024
+encoder_layers: 24
+decoder_layers: 24
+
+# Model architecture details
+attention_dropout: 0.1
+hidden_dropout: 0.1
+activation_function: "gelu"
+layer_norm_eps: 1.0e-5
+initializer_range: 0.02
+relative_attention_num_buckets: 32
+relative_attention_max_distance: 128
+
+# Training configuration
+tie_word_embeddings: true
+use_cache: true
+return_dict: true
+output_hidden_states: false
+output_attentions: false
+torchscript: false
+use_bfloat16: false 

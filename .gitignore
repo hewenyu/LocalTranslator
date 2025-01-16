@@ -50,3 +50,6 @@ node_modules/
 # ignore all files in the vcpkg directory
 vcpkg_installed/
 
+# ignore all files in the models directory
+models/
+
