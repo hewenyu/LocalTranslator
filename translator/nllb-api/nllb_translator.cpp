@@ -352,6 +352,7 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
 
                 // 添加past_key_values到输入名称
                 std::vector<std::string> input_name_strings;
+                input_name_strings.reserve(model_config_.num_layers * 4);
                 for (int layer = 0; layer < model_config_.num_layers; ++layer) {
                     for (const auto& suffix : {".decoder.key", ".decoder.value", ".encoder.key", ".encoder.value"}) {
                         input_name_strings.push_back("past_key_values." + std::to_string(layer) + suffix);
@@ -371,24 +372,36 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
                         std::array<int64_t, 4> kv_shape{1, model_config_.num_heads, 0, model_config_.hidden_size / model_config_.num_heads};
                         std::vector<float> empty_kv;
                         
+                        // 创建decoder key tensor
                         auto decoder_key = Ort::Value::CreateTensor<float>(memory_info,
                             empty_kv.data(), empty_kv.size(), kv_shape.data(), kv_shape.size());
-                        decoder_inputs.push_back(std::move(decoder_key));
+                        cache.update_decoder_key(layer, std::move(decoder_key));
+                        decoder_inputs.push_back(cache.get_decoder_key(layer));
                         
+                        // 创建decoder value tensor
                         auto decoder_value = Ort::Value::CreateTensor<float>(memory_info,
                             empty_kv.data(), empty_kv.size(), kv_shape.data(), kv_shape.size());
-                        decoder_inputs.push_back(std::move(decoder_value));
+                        cache.update_decoder_value(layer, std::move(decoder_value));
+                        decoder_inputs.push_back(cache.get_decoder_value(layer));
                         
                         // 使用encoder的present值
                         std::array<int64_t, 4> encoder_kv_shape{1, model_config_.num_heads, 
                             static_cast<int64_t>(encoder_output.size() / model_config_.hidden_size),
                             model_config_.hidden_size / model_config_.num_heads};
                         
-                        auto encoder_key = cache.get_encoder_key(layer);
-                        decoder_inputs.push_back(std::move(encoder_key));
+                        std::vector<float> encoder_kv(encoder_kv_shape[1] * encoder_kv_shape[2] * encoder_kv_shape[3], 0.0f);
                         
-                        auto encoder_value = cache.get_encoder_value(layer);
-                        decoder_inputs.push_back(std::move(encoder_value));
+                        // 创建encoder key tensor
+                        auto encoder_key = Ort::Value::CreateTensor<float>(memory_info,
+                            encoder_kv.data(), encoder_kv.size(), encoder_kv_shape.data(), encoder_kv_shape.size());
+                        cache.update_encoder_key(layer, std::move(encoder_key));
+                        decoder_inputs.push_back(cache.get_encoder_key(layer));
+                        
+                        // 创建encoder value tensor
+                        auto encoder_value = Ort::Value::CreateTensor<float>(memory_info,
+                            encoder_kv.data(), encoder_kv.size(), encoder_kv_shape.data(), encoder_kv_shape.size());
+                        cache.update_encoder_value(layer, std::move(encoder_value));
+                        decoder_inputs.push_back(cache.get_encoder_value(layer));
                     } else {
                         // 后续迭代：使用上一次的present值
                         decoder_inputs.push_back(cache.get_decoder_key(layer));

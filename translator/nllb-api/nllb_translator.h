@@ -10,33 +10,6 @@
 
 namespace nllb {
 
-class CacheState {
-public:
-    CacheState(int max_length, int hidden_size, int num_heads, int num_layers)
-        : max_length_(max_length), hidden_size_(hidden_size), num_heads_(num_heads),
-          decoder_keys_(num_layers), decoder_values_(num_layers),
-          encoder_keys_(num_layers), encoder_values_(num_layers) {}
-
-    Ort::Value get_decoder_key(int layer) const { return std::move(decoder_keys_[layer]); }
-    Ort::Value get_decoder_value(int layer) const { return std::move(decoder_values_[layer]); }
-    Ort::Value get_encoder_key(int layer) const { return std::move(encoder_keys_[layer]); }
-    Ort::Value get_encoder_value(int layer) const { return std::move(encoder_values_[layer]); }
-
-    void update_decoder_key(int layer, Ort::Value key) { decoder_keys_[layer] = std::move(key); }
-    void update_decoder_value(int layer, Ort::Value value) { decoder_values_[layer] = std::move(value); }
-    void update_encoder_key(int layer, Ort::Value key) { encoder_keys_[layer] = std::move(key); }
-    void update_encoder_value(int layer, Ort::Value value) { encoder_values_[layer] = std::move(value); }
-
-private:
-    int max_length_;
-    int hidden_size_;
-    int num_heads_;
-    std::vector<Ort::Value> decoder_keys_;
-    std::vector<Ort::Value> decoder_values_;
-    std::vector<Ort::Value> encoder_keys_;
-    std::vector<Ort::Value> encoder_values_;
-};
-
 struct ModelConfig {
     int hidden_size;
     int num_heads;

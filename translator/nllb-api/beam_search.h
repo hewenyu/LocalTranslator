@@ -4,6 +4,7 @@
 #include <functional>
 #include <stdexcept>
 #include <random>
+#include <onnxruntime_cxx_api.h>
 
 namespace nllb {
 
@@ -71,35 +72,31 @@ struct BeamHypothesis {
 };
 
 // 缓存状态管理
-struct CacheState {
-    std::vector<float> key_cache;     // key投影的缓存
-    std::vector<float> value_cache;   // value投影的缓存
-    int current_length;               // 当前序列长度
-    int hidden_size;                 // 隐藏层大小
-    int num_heads;                   // 注意力头数量
+class CacheState {
+public:
+    CacheState(int max_length, int hidden_size, int num_heads, int num_layers)
+        : max_length_(max_length), hidden_size_(hidden_size), num_heads_(num_heads),
+          decoder_keys_(num_layers), decoder_values_(num_layers),
+          encoder_keys_(num_layers), encoder_values_(num_layers) {}
 
-    CacheState(int max_length, int hidden_size, int num_heads)
-        : key_cache(max_length * hidden_size)
-        , value_cache(max_length * hidden_size)
-        , current_length(0)
-        , hidden_size(hidden_size)
-        , num_heads(num_heads) {}
+    Ort::Value get_decoder_key(int layer) const { return std::move(decoder_keys_[layer]); }
+    Ort::Value get_decoder_value(int layer) const { return std::move(decoder_values_[layer]); }
+    Ort::Value get_encoder_key(int layer) const { return std::move(encoder_keys_[layer]); }
+    Ort::Value get_encoder_value(int layer) const { return std::move(encoder_values_[layer]); }
 
-    void update(const std::vector<float>& new_key,
-               const std::vector<float>& new_value) {
-        // 更新缓存
-        std::copy(new_key.begin(), new_key.end(),
-                 key_cache.begin() + current_length * hidden_size);
-        std::copy(new_value.begin(), new_value.end(),
-                 value_cache.begin() + current_length * hidden_size);
-        current_length++;
-    }
+    void update_decoder_key(int layer, Ort::Value key) { decoder_keys_[layer] = std::move(key); }
+    void update_decoder_value(int layer, Ort::Value value) { decoder_values_[layer] = std::move(value); }
+    void update_encoder_key(int layer, Ort::Value key) { encoder_keys_[layer] = std::move(key); }
+    void update_encoder_value(int layer, Ort::Value value) { encoder_values_[layer] = std::move(value); }
 
-    void clear() {
-        std::fill(key_cache.begin(), key_cache.end(), 0.0f);
-        std::fill(value_cache.begin(), value_cache.end(), 0.0f);
-        current_length = 0;
-    }
+private:
+    int max_length_;
+    int hidden_size_;
+    int num_heads_;
+    std::vector<Ort::Value> decoder_keys_;
+    std::vector<Ort::Value> decoder_values_;
+    std::vector<Ort::Value> encoder_keys_;
+    std::vector<Ort::Value> encoder_values_;
 };
 
 // Beam Search解码器
