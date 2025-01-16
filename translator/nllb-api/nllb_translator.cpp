@@ -30,6 +30,7 @@ ModelConfig ModelConfig::load_from_yaml(const std::string& config_path) {
         ModelConfig model_config;
         model_config.hidden_size = config["hidden_size"].as<int>();
         model_config.num_heads = config["num_heads"].as<int>();
+        model_config.num_layers = config["decoder_layers"].as<int>();
         model_config.vocab_size = config["vocab_size"].as<int>();
         model_config.max_position_embeddings = config["max_position_embeddings"].as<int>();
         model_config.encoder_layers = config["encoder_layers"].as<int>();
@@ -265,99 +266,69 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
             model_config_.hidden_size,
             model_config_.num_heads
         );
-
-        // 定义单步解码函数
-        auto step_function = [this, &encoder_output](
-            const std::vector<int64_t>& tokens,
-            const CacheState& cache) -> std::vector<float> {
+        
+        // 准备encoder输出tensor
+        auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
+        std::array<int64_t, 3> encoder_shape{1, static_cast<int64_t>(encoder_output.size() / model_config_.hidden_size), model_config_.hidden_size};
+        auto encoder_tensor = Ort::Value::CreateTensor<float>(memory_info,
+            const_cast<float*>(encoder_output.data()),
+            encoder_output.size(), encoder_shape.data(), encoder_shape.size());
             
-            // 准备输入张量
-            auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
-            std::array<int64_t, 2> input_shape{1, static_cast<int64_t>(tokens.size())};
-            
-            auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(
-                memory_info,
-                const_cast<int64_t*>(tokens.data()),
-                tokens.size(),
-                input_shape.data(),
-                input_shape.size());
-
-            // 准备encoder输出
-            std::array<int64_t, 2> encoder_shape{1, static_cast<int64_t>(encoder_output.size())};
-            auto encoder_tensor = Ort::Value::CreateTensor<float>(
-                memory_info,
-                const_cast<float*>(encoder_output.data()),
-                encoder_output.size(),
-                encoder_shape.data(),
-                encoder_shape.size());
-
-            // 运行decoder
-            const char* input_names[] = {"input_ids", "encoder_output"};
-            std::vector<Ort::Value> input_tensors;
-            input_tensors.push_back(std::move(input_ids_tensor));
-            input_tensors.push_back(std::move(encoder_tensor));
-            const char* output_names[] = {"logits"};
-
-            auto output_tensors = decoder_session_->Run(
-                Ort::RunOptions{nullptr},
-                input_names,
-                input_tensors.data(),
-                input_tensors.size(),
-                output_names,
-                1
-            );
-
-            // 获取logits
-            float* logits_data = output_tensors[0].GetTensorMutableData<float>();
-            size_t vocab_size = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape()[2];
-            
-            // 计算最后一个token的概率分布
-            std::vector<float> scores(logits_data + (tokens.size() - 1) * vocab_size,
-                                    logits_data + tokens.size() * vocab_size);
-            
-            // 应用softmax
-            float max_score = *std::max_element(scores.begin(), scores.end());
-            float sum = 0.0f;
-            for (auto& score : scores) {
-                score = std::exp(score - max_score);
-                sum += score;
-            }
-            for (auto& score : scores) {
-                score /= sum;
-            }
-
-            return scores;
-        };
-
-        // 初始化候选序列
+        // 初始化beam search
         std::vector<BeamHypothesis> hypotheses;
         hypotheses.emplace_back(std::vector<int64_t>{tokenizer_->bos_id()}, 0.0f);
-
-        // 主解码循环
+        
+        // 主循环
         for (int step = 0; step < params_.max_length; ++step) {
-            // 检查是否所有序列都已完成
-            bool all_done = true;
+            std::vector<BeamHypothesis> new_hypotheses;
+            
             for (const auto& hyp : hypotheses) {
-                if (!hyp.is_done) {
-                    all_done = false;
-                    break;
+                if (hyp.is_done) {
+                    new_hypotheses.push_back(hyp);
+                    continue;
                 }
-            }
-            if (all_done) break;
-
-            // 获取活跃的候选序列
-            std::vector<BeamHypothesis> active_hypotheses;
-            for (const auto& hyp : hypotheses) {
-                if (!hyp.is_done) {
-                    active_hypotheses.push_back(hyp);
-                }
-            }
-
-            // 对每个活跃的候选序列进行预测
-            std::vector<std::vector<float>> next_token_scores;
-            for (const auto& hyp : active_hypotheses) {
-                auto scores = step_function(hyp.tokens, cache);
                 
+                // 准备decoder输入
+                std::array<int64_t, 2> input_shape{1, static_cast<int64_t>(hyp.tokens.size())};
+                auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(memory_info,
+                    const_cast<int64_t*>(hyp.tokens.data()),
+                    hyp.tokens.size(), input_shape.data(), input_shape.size());
+                    
+                // 运行decoder
+                const char* decoder_input_names[] = {"input_ids", "encoder_hidden_states"};
+                std::vector<Ort::Value> decoder_inputs;
+                decoder_inputs.push_back(std::move(input_ids_tensor));
+                decoder_inputs.push_back(std::move(encoder_tensor));
+                
+                const char* decoder_output_names[] = {"logits"};
+                auto decoder_outputs = decoder_session_->Run(
+                    Ort::RunOptions{nullptr},
+                    decoder_input_names,
+                    decoder_inputs.data(),
+                    decoder_inputs.size(),
+                    decoder_output_names,
+                    1
+                );
+                
+                // 获取logits
+                float* logits_data = decoder_outputs[0].GetTensorMutableData<float>();
+                size_t vocab_size = decoder_outputs[0].GetTensorTypeAndShapeInfo().GetShape()[2];
+                
+                // 计算最后一个token的概率分布
+                std::vector<float> scores(logits_data + (hyp.tokens.size() - 1) * vocab_size,
+                                        logits_data + hyp.tokens.size() * vocab_size);
+                
+                // 应用softmax
+                float max_score = *std::max_element(scores.begin(), scores.end());
+                float sum = 0.0f;
+                for (auto& score : scores) {
+                    score = std::exp(score - max_score);
+                    sum += score;
+                }
+                for (auto& score : scores) {
+                    score /= sum;
+                }
+
                 // 应用重复惩罚
                 for (size_t i = 0; i < scores.size(); ++i) {
                     if (std::find(hyp.tokens.begin(), hyp.tokens.end(), i) != hyp.tokens.end()) {
@@ -412,35 +383,13 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
                     }
                 }
 
-                next_token_scores.push_back(scores);
-            }
-
-            // 为每个候选序列选择最佳的下一个token
-            std::vector<BeamHypothesis> new_hypotheses;
-            for (size_t i = 0; i < active_hypotheses.size(); ++i) {
-                const auto& hyp = active_hypotheses[i];
-                const auto& scores = next_token_scores[i];
-
-                // 获取top-k个token
-                std::vector<std::pair<float, int64_t>> top_k;
-                top_k.reserve(scores.size());
-                for (size_t j = 0; j < scores.size(); ++j) {
-                    if (scores[j] > 0) {
-                        top_k.emplace_back(scores[j], j);
-                    }
-                }
-                std::partial_sort(top_k.begin(),
-                                top_k.begin() + params_.beam_size,
-                                top_k.end(),
-                                std::greater<>());
-
-                // 为每个top-k token创建新的候选序列
-                for (int k = 0; k < params_.beam_size && k < top_k.size(); ++k) {
+                // 为每个token创建新的候选序列
+                for (size_t i = 0; i < scores.size(); ++i) {
                     auto new_tokens = hyp.tokens;
-                    new_tokens.push_back(top_k[k].second);
+                    new_tokens.push_back(i);
                     
-                    float new_score = hyp.score + std::log(top_k[k].first);
-                    bool is_done = (top_k[k].second == tokenizer_->eos_id());
+                    float new_score = hyp.score + std::log(scores[i]);
+                    bool is_done = (i == tokenizer_->eos_id());
                     
                     // 应用长度惩罚
                     float length_penalty = std::pow((5.0f + new_tokens.size()) / 6.0f, 
@@ -453,13 +402,6 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
                     }
                     
                     new_hypotheses.emplace_back(new_tokens, new_score, is_done);
-                }
-            }
-
-            // 添加已完成的序列
-            for (const auto& hyp : hypotheses) {
-                if (hyp.is_done) {
-                    new_hypotheses.push_back(hyp);
                 }
             }
 

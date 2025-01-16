@@ -13,10 +13,16 @@ namespace nllb {
 struct ModelConfig {
     int hidden_size;
     int num_heads;
+    int num_layers;
     int vocab_size;
     int max_position_embeddings;
     int encoder_layers;
     int decoder_layers;
+
+    ModelConfig(int hidden_size = 1024, int num_heads = 16, int num_layers = 24)
+        : hidden_size(hidden_size), num_heads(num_heads), num_layers(num_layers),
+          vocab_size(256200), max_position_embeddings(1024),
+          encoder_layers(24), decoder_layers(24) {}
 
     static ModelConfig load_from_yaml(const std::string& config_path);
 };
