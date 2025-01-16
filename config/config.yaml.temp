@@ -4,7 +4,7 @@ type: DeepLX
 
 # DeepLX Configuration
 deeplx:
-  url: "http://localhost:1188"      # DeepLX service URL
+  url: "http://localhost:1188/translate"      # DeepLX service URL
   token: ""                         # Optional: Authentication token
   target_lang: "ZH"                 # Target language (default: ZH)
 

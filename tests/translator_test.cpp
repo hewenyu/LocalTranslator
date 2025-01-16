@@ -10,7 +10,7 @@ protected:
         // 设置测试环境
         common::TranslatorConfig config;
         config.type = "DeepLX";
-        config.deeplx.url = "http://localhost:1188";
+        config.deeplx.url = "http://localhost:1188/translate";
         config.deeplx.target_lang = "zh";
         
         // 创建翻译器实例
