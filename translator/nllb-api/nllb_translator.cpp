@@ -495,6 +495,14 @@ std::string NLLBTranslator::translate(
     }
 }
 
+std::string NLLBTranslator::get_nllb_language_code(const std::string& lang_code) const {
+    auto it = nllb_language_codes_.find(lang_code);
+    if (it == nllb_language_codes_.end()) {
+        throw std::runtime_error("Unsupported language code: " + lang_code);
+    }
+    return it->second;
+}
+
 std::string NLLBTranslator::get_target_language() const {
     return target_lang_;
 }
