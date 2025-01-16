@@ -10,6 +10,7 @@
 #include <onnxruntime_cxx_api.h>
 #include <onnxruntime_c_api.h>
 #include <windows.h>
+#include <tinyxml2.h>
 
 namespace nllb {
 
@@ -89,13 +90,24 @@ NLLBTranslator::~NLLBTranslator() = default;
 
 void NLLBTranslator::initialize_language_codes() {
     spdlog::debug("Loading language codes...");
-    std::string lang_file = model_dir_ + "/nllb_languages.yaml";
+    std::string lang_file = model_dir_ + "/nllb_supported_languages.xml";
     try {
-        YAML::Node config = YAML::LoadFile(lang_file);
-        for (const auto& lang : config["languages"]) {
-            std::string code = lang["code"].as<std::string>();
-            std::string nllb_code = lang["code_NLLB"].as<std::string>();
-            nllb_language_codes_[code] = nllb_code;
+        tinyxml2::XMLDocument doc;
+        if (doc.LoadFile(lang_file.c_str()) != tinyxml2::XML_SUCCESS) {
+            throw std::runtime_error("Failed to load XML file: " + lang_file);
+        }
+
+        auto root = doc.FirstChildElement("languages");
+        if (!root) {
+            throw std::runtime_error("Invalid XML format: missing root element");
+        }
+
+        for (auto lang = root->FirstChildElement("language"); lang; lang = lang->NextSiblingElement("language")) {
+            auto code = lang->FirstChildElement("code");
+            auto nllb_code = lang->FirstChildElement("code_NLLB");
+            if (code && nllb_code) {
+                nllb_language_codes_[code->GetText()] = nllb_code->GetText();
+            }
         }
         spdlog::info("Loaded {} language codes", nllb_language_codes_.size());
     } catch (const std::exception& e) {
@@ -117,6 +129,15 @@ void NLLBTranslator::load_models() {
         encoder_session_ = std::make_unique<Ort::Session>(ort_env_, 
             w_encoder_path.c_str(), session_opts);
         spdlog::info("Loaded encoder model: {}", encoder_path);
+
+        // Print encoder output names
+        Ort::AllocatorWithDefaultOptions allocator;
+        size_t num_output_nodes = encoder_session_->GetOutputCount();
+        spdlog::info("Encoder output nodes: {}", num_output_nodes);
+        for (size_t i = 0; i < num_output_nodes; i++) {
+            auto output_name = encoder_session_->GetOutputNameAllocated(i, allocator);
+            spdlog::info("Encoder output {}: {}", i, output_name.get());
+        }
 
         // Load decoder
         std::string decoder_path = model_dir_ + "/NLLB_decoder.onnx";
@@ -168,7 +189,7 @@ std::vector<float> NLLBTranslator::run_encoder(const Tokenizer::TokenizerOutput&
         std::vector<Ort::Value> input_tensors;
         input_tensors.push_back(std::move(input_ids_tensor));
         input_tensors.push_back(std::move(attention_mask_tensor));
-        const char* output_names[] = {"encoder_output"};
+        const char* output_names[] = {"last_hidden_state"};
         
         auto encoder_outputs = encoder_session_->Run(
             Ort::RunOptions{nullptr},
@@ -458,37 +479,24 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
     }
 }
 
-std::string NLLBTranslator::translate(
-    const std::string& text,
-    const std::string& source_lang) const {
+std::string NLLBTranslator::translate(const std::string& text, const std::string& source_lang) const {
+    spdlog::info("Starting translation from {} to {}", source_lang, target_lang_);
     try {
-        auto start_time = std::chrono::high_resolution_clock::now();
-        spdlog::info("Starting translation from {} to {}", source_lang, target_lang_);
-        spdlog::debug("Input text: {}", text);
+        // 获取 NLLB 语言代码
+        std::string src_lang_nllb = get_nllb_language_code(source_lang);
+        std::string tgt_lang_nllb = get_nllb_language_code(target_lang_);
 
-        // Convert language codes
-        std::string nllb_source = get_nllb_language_code(source_lang);
-        std::string nllb_target = get_nllb_language_code(target_lang_);
-
-        // Tokenize input
-        auto tokens = tokenizer_->encode(text, nllb_source, nllb_target);
-        spdlog::debug("Tokenized input length: {}", tokens.input_ids.size());
-
-        // Run encoder
+        // 对输入文本进行分词
+        auto tokens = tokenizer_->encode(text, src_lang_nllb, tgt_lang_nllb);
+        
+        // 运行编码器
         auto encoder_output = run_encoder(tokens);
-
-        // Run decoder
-        auto output_ids = run_decoder(encoder_output, nllb_target);
-
-        // Decode output tokens
-        auto result = tokenizer_->decode(output_ids);
-
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-        spdlog::info("Translation completed in {} ms", duration.count());
-        spdlog::debug("Output text: {}", result);
-
-        return result;
+        
+        // 运行解码器
+        auto output_ids = run_decoder(encoder_output, tgt_lang_nllb);
+        
+        // 将输出转换为文本
+        return tokenizer_->decode(output_ids);
     } catch (const std::exception& e) {
         spdlog::error("Translation failed: {}", e.what());
         throw std::runtime_error("Translation failed: " + std::string(e.what()));

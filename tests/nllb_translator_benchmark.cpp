@@ -11,65 +11,24 @@ class NLLBTranslatorBenchmark : public benchmark::Fixture {
 public:
     void SetUp(const benchmark::State& state) {
         // 设置测试配置
-        config.nllb.model_dir = "test_models/nllb";
-        config.nllb.target_lang = "eng_Latn";
+        config.nllb.model_dir = "../../../models";  // 使用实际的模型目录
+        config.nllb.target_lang = "zh";  // 目标语言设置为中文
         config.nllb.params.beam_size = state.range(0);  // 使用参数作为beam size
         config.nllb.params.max_length = 128;
         config.nllb.params.length_penalty = 1.0f;
         config.nllb.params.temperature = 1.0f;
         config.nllb.params.num_threads = static_cast<int>(state.range(1));  // 使用参数作为线程数
         config.nllb.params.use_cache = true;
-        config.nllb.model_files.tokenizer_vocab = "tokenizer.model";
-        
-        // 确保测试目录存在
-        fs::create_directories(config.nllb.model_dir);
-        create_test_configs(config.nllb.model_dir);
+        config.nllb.model_files.tokenizer_vocab = "sentencepiece_bpe.model";
         
         translator = std::make_unique<nllb::NLLBTranslator>(config);
     }
 
     void TearDown(const benchmark::State&) {
         translator.reset();
-        if (fs::exists("test_models")) {
-            fs::remove_all("test_models");
-        }
     }
 
 protected:
-    void create_test_configs(const std::string& model_dir) {
-        // 创建model_config.yaml
-        std::ofstream model_config(model_dir + "/model_config.yaml");
-        model_config << R"(
-hidden_size: 1024
-num_heads: 16
-vocab_size: 256200
-max_position_embeddings: 1024
-encoder_layers: 24
-decoder_layers: 24
-)";
-        model_config.close();
-        
-        // 创建language_codes.yaml
-        std::ofstream lang_config(model_dir + "/nllb_languages.yaml");
-        lang_config << R"(
-languages:
-  - code: "eng"
-    code_NLLB: "eng_Latn"
-  - code: "fra"
-    code_NLLB: "fra_Latn"
-  - code: "cmn"
-    code_NLLB: "zho_Hans"
-)";
-        lang_config.close();
-        
-        // 创建空的模型文件
-        std::ofstream(model_dir + "/NLLB_encoder.onnx").close();
-        std::ofstream(model_dir + "/NLLB_decoder.onnx").close();
-        std::ofstream(model_dir + "/NLLB_embed_and_lm_head.onnx").close();
-        std::ofstream(model_dir + "/NLLB_cache_initializer.onnx").close();
-        std::ofstream(model_dir + "/tokenizer.model").close();
-    }
-
     common::TranslatorConfig config;
     std::unique_ptr<nllb::NLLBTranslator> translator;
 };
@@ -79,9 +38,10 @@ BENCHMARK_DEFINE_F(NLLBTranslatorBenchmark, BeamSizeTest)(benchmark::State& stat
     const std::string text = "Hello, world! This is a test sentence for benchmarking.";
     for (auto _ : state) {
         try {
-            translator->translate(text, "eng");
-        } catch (const std::exception&) {
-            // 忽略错误，因为我们使用的是空模型
+            translator->translate(text, "en");
+        } catch (const std::exception& e) {
+            state.SkipWithError(e.what());
+            break;
         }
     }
     
@@ -97,9 +57,10 @@ BENCHMARK_DEFINE_F(NLLBTranslatorBenchmark, InputLengthTest)(benchmark::State& s
     std::string text(state.range(2), 'a');
     for (auto _ : state) {
         try {
-            translator->translate(text, "eng");
-        } catch (const std::exception&) {
-            // 忽略错误，因为我们使用的是空模型
+            translator->translate(text, "en");
+        } catch (const std::exception& e) {
+            state.SkipWithError(e.what());
+            break;
         }
     }
     
@@ -114,9 +75,10 @@ BENCHMARK_DEFINE_F(NLLBTranslatorBenchmark, ThreadCountTest)(benchmark::State& s
     const std::string text = "Hello, world! This is a test sentence for benchmarking.";
     for (auto _ : state) {
         try {
-            translator->translate(text, "eng");
-        } catch (const std::exception&) {
-            // 忽略错误，因为我们使用的是空模型
+            translator->translate(text, "en");
+        } catch (const std::exception& e) {
+            state.SkipWithError(e.what());
+            break;
         }
     }
     
