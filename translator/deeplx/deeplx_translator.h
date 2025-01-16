@@ -34,6 +34,13 @@ private:
     std::string path_;
     int port_;
     mutable CURL* curl_;
+
+    // 大写
+    std::string to_upper(const std::string& s) const {
+        std::string upper = s;
+        std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+        return upper;
+    }
 };
 
 } // namespace deeplx 

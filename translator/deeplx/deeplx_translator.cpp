@@ -110,8 +110,8 @@ std::string DeepLXTranslator::translate(const std::string& text, const std::stri
 
     json requestJson = {
         {"text", text},
-        {"source_lang", source_lang},
-        {"target_lang", target_lang_}
+        {"source_lang", to_upper(source_lang)},
+        {"target_lang", to_upper(target_lang_)}
     };
 
     std::string jsonStr = requestJson.dump();
