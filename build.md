@@ -16,6 +16,7 @@
 ```bash
 # 安装依赖包
 vcpkg install curl:x64-windows yaml-cpp:x64-windows nlohmann-json:x64-windows gtest:x64-windows
+# C:\Users\boringsoft\code\microsoft\vcpkg\vcpkg.exe install --triplet=x64-windows
 ```
 
 ## 构建步骤
