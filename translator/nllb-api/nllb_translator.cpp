@@ -2,6 +2,7 @@
 #include <stdexcept>
 #include <filesystem>
 #include <chrono>
+#include <algorithm>
 #include <yaml-cpp/yaml.h>
 #include <spdlog/spdlog.h>
 #include "translator/nllb-api/nllb_translator.h"
@@ -414,7 +415,7 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
                             });
 
             hypotheses.clear();
-            size_t copy_size = std::min(static_cast<size_t>(params_.beam_size), new_hypotheses.size());
+            auto copy_size = std::min<size_t>(params_.beam_size, new_hypotheses.size());
             hypotheses.insert(
                 hypotheses.begin(),
                 new_hypotheses.begin(),
