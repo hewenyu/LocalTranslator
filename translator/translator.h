@@ -14,8 +14,6 @@ enum class TranslatorType {
     None
 };
 
-
-
 // Base class for all translators
 class ITranslator {
 public:

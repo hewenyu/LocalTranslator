@@ -4,6 +4,7 @@
   "dependencies": [
     "yaml-cpp",
     "curl",
-    "nlohmann-json"
+    "nlohmann-json",
+    "gtest"
   ]
 } 

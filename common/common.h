@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+#include <yaml-cpp/yaml.h>
+#include <iostream>
 
 namespace common {
 // DeepLX translator Config
@@ -23,20 +25,37 @@ struct TranslatorConfig {
     common::DeepLXConfig deeplx;
     common::NLLBConfig nllb;
 
-    static TranslatorConfig LoadFromFile(const std::string& config_path){
-
-        try{
+    static TranslatorConfig LoadFromFile(const std::string& config_path) {
+        TranslatorConfig config;
+        try {
             // yaml load file
-            YAML::Node config = YAML::LoadFile(config_path);
-
+            YAML::Node yaml_config = YAML::LoadFile(config_path);
+            
+            // Load type
+            if (yaml_config["type"]) {
+                config.type = yaml_config["type"].as<std::string>();
+            }
+            
+            // Load DeepLX config
+            if (yaml_config["deeplx"]) {
+                auto deeplx = yaml_config["deeplx"];
+                if (deeplx["url"]) config.deeplx.url = deeplx["url"].as<std::string>();
+                if (deeplx["token"]) config.deeplx.token = deeplx["token"].as<std::string>();
+                if (deeplx["target_lang"]) config.deeplx.target_lang = deeplx["target_lang"].as<std::string>();
+            }
+            
+            // Load NLLB config
+            if (yaml_config["nllb"]) {
+                auto nllb = yaml_config["nllb"];
+                if (nllb["model_path"]) config.nllb.model_path = nllb["model_path"].as<std::string>();
+                if (nllb["target_lang"]) config.nllb.target_lang = nllb["target_lang"].as<std::string>();
+            }
         }
-        catch(const std::exception& e){
+        catch(const std::exception& e) {
             std::cerr << "Error loading config from file: " << e.what() << std::endl;
-            return TranslatorConfig();
         }
-    };
+        return config;
+    }
 };
-
-
 
 } // namespace common

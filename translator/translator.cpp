@@ -3,7 +3,20 @@
 
 namespace translator {
 
-std::unique_ptr<ITranslator> CreateTranslator(TranslatorType type, const common::TranslatorConfig& config) {
+    // 根据 配置获取类型
+TranslatorType GetTranslatorType(const common::TranslatorConfig& config) {
+    if (config.type == "DeepLX") {
+        return TranslatorType::DeepLX;
+    } else if (config.type == "NLLB") {
+        return TranslatorType::NLLB;
+    } else {
+        return TranslatorType::None;
+    }
+};
+
+
+std::unique_ptr<ITranslator> CreateTranslator( const common::TranslatorConfig& config) {
+    TranslatorType type = GetTranslatorType(config);
     switch (type) {
         case TranslatorType::DeepLX:
             return std::make_unique<deeplx::DeepLXTranslator>(config);
