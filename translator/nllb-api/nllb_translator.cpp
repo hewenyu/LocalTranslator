@@ -414,10 +414,12 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
                             });
 
             hypotheses.clear();
-            hypotheses.insert(hypotheses.end(),
-                            new_hypotheses.begin(),
-                            new_hypotheses.begin() + std::min(static_cast<size_t>(params_.beam_size),
-                                                            new_hypotheses.size()));
+            size_t copy_size = std::min(static_cast<size_t>(params_.beam_size), new_hypotheses.size());
+            hypotheses.insert(
+                hypotheses.begin(),
+                new_hypotheses.begin(),
+                new_hypotheses.begin() + copy_size
+            );
 
             // 检查是否需要提前停止
             if (step > 0 && step % 10 == 0) {
