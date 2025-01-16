@@ -170,20 +170,18 @@ std::vector<float> NLLBTranslator::run_encoder(const Tokenizer::TokenizerOutput&
 
         // Run encoder
         const char* input_names[] = {"input_ids", "attention_mask"};
+        const Ort::Value input_values[] = {input_ids_tensor, attention_mask_tensor};
         const char* output_names[] = {"encoder_output"};
         
-        auto output_tensors = encoder_session_->Run(
+        auto encoder_outputs = encoder_session_->Run(
             Ort::RunOptions{nullptr},
-            input_names,
-            std::array<Ort::Value, 2>{std::move(input_ids_tensor), std::move(attention_mask_tensor)}.data(),
-            2,
-            output_names,
-            1
+            input_names, input_values, 2,
+            output_names, 1
         );
 
         // Get output data
-        float* output_data = output_tensors[0].GetTensorMutableData<float>();
-        size_t output_size = output_tensors[0].GetTensorTypeAndShapeInfo().GetElementCount();
+        float* output_data = encoder_outputs[0].GetTensorMutableData<float>();
+        size_t output_size = encoder_outputs[0].GetTensorTypeAndShapeInfo().GetElementCount();
         
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -242,7 +240,7 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
             );
 
             // 获取logits
-            float* logits_data = output_tensors[0].GetTensorMutableData<float>();
+            float* logits_data = static_cast<float*>(output_tensors[0].GetTensorMutableData());
             size_t vocab_size = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape()[2];
             
             // 计算最后一个token的概率分布
@@ -473,7 +471,7 @@ std::string NLLBTranslator::translate(
         auto result = tokenizer_->decode(output_ids);
 
         auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::milliseconds>(end_time - start_time);
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
         spdlog::info("Translation completed in {} ms", duration.count());
         spdlog::debug("Output text: {}", result);
 
