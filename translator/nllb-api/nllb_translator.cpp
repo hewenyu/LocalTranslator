@@ -308,12 +308,20 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
                 auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(memory_info,
                     const_cast<int64_t*>(hyp.tokens.data()),
                     hyp.tokens.size(), input_shape.data(), input_shape.size());
-                    
+
+                // 创建encoder_attention_mask tensor
+                std::vector<int64_t> attention_mask(encoder_output.size() / model_config_.hidden_size, 1);
+                std::array<int64_t, 2> attention_shape{1, static_cast<int64_t>(attention_mask.size())};
+                auto attention_mask_tensor = Ort::Value::CreateTensor<int64_t>(memory_info,
+                    attention_mask.data(), attention_mask.size(),
+                    attention_shape.data(), attention_shape.size());
+
                 // 运行decoder
-                const char* decoder_input_names[] = {"input_ids", "encoder_hidden_states"};
+                const char* decoder_input_names[] = {"embed_matrix", "encoder_attention_mask", "input_ids"};
                 std::vector<Ort::Value> decoder_inputs;
-                decoder_inputs.push_back(std::move(input_ids_tensor));
                 decoder_inputs.push_back(std::move(encoder_tensor));
+                decoder_inputs.push_back(std::move(attention_mask_tensor));
+                decoder_inputs.push_back(std::move(input_ids_tensor));
                 
                 const char* decoder_output_names[] = {"logits"};
                 auto decoder_outputs = decoder_session_->Run(
