@@ -15,11 +15,13 @@ TranslatorType GetTranslatorType(const common::TranslatorConfig& config) {
 };
 
 
-std::unique_ptr<ITranslator> CreateTranslator( const common::TranslatorConfig& config) {
-    TranslatorType type = GetTranslatorType(config);
+std::unique_ptr<ITranslator> CreateTranslator(TranslatorType type, const common::TranslatorConfig& config) {
     switch (type) {
         case TranslatorType::DeepLX:
             return std::make_unique<deeplx::DeepLXTranslator>(config);
+        case TranslatorType::NLLB:
+            // TODO: Implement NLLB translator
+            return nullptr;
         case TranslatorType::None:
         default:
             return nullptr;
