@@ -568,9 +568,11 @@ std::vector<float> NLLBTranslator::run_embedding(const std::vector<int64_t>& inp
             &use_lm_head_value, 1, scalar_shape.data(), scalar_shape.size());
             
         // pre_logits为空tensor，因为我们只需要embeddings
-        std::array<int64_t, 2> empty_shape{0, model_config_.hidden_size};
+        // 注意：pre_logits需要是3维tensor: [batch_size, sequence_length, hidden_size]
+        std::array<int64_t, 3> empty_shape{1, 1, model_config_.hidden_size};
+        std::vector<float> pre_logits_data(model_config_.hidden_size, 0.0f);
         auto pre_logits_tensor = Ort::Value::CreateTensor<float>(memory_info,
-            nullptr, 0, empty_shape.data(), empty_shape.size());
+            pre_logits_data.data(), pre_logits_data.size(), empty_shape.data(), empty_shape.size());
             
         // 运行embedding模型
         const char* embed_input_names[] = {"use_lm_head", "input_ids", "pre_logits"};
@@ -579,7 +581,7 @@ std::vector<float> NLLBTranslator::run_embedding(const std::vector<int64_t>& inp
         embed_inputs.push_back(std::move(input_ids_tensor));
         embed_inputs.push_back(std::move(pre_logits_tensor));
         
-        const char* embed_output_names[] = {"embeddings"};
+        const char* embed_output_names[] = {"embed_matrix"};
         auto embed_outputs = embed_lm_head_session_->Run(
             Ort::RunOptions{nullptr},
             embed_input_names,
