@@ -24,6 +24,7 @@ find_package(GTest REQUIRED)
 add_library(translator
     translator/translator.cpp
     translator/deeplx/deeplx_translator.cpp
+    translator/nllb-api/nllb_translator.cpp
 )
 
 # 设置包含目录

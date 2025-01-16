@@ -1,5 +1,6 @@
 #include "translator.h"
 #include "deeplx/deeplx_translator.h"
+#include "nllb-api/nllb_translator.h"
 
 namespace translator {
 
@@ -20,8 +21,7 @@ std::unique_ptr<ITranslator> CreateTranslator(TranslatorType type, const common:
         case TranslatorType::DeepLX:
             return std::make_unique<deeplx::DeepLXTranslator>(config);
         case TranslatorType::NLLB:
-            // TODO: Implement NLLB translator
-            return nullptr;
+            return std::make_unique<nllb::NLLBTranslator>(config);
         case TranslatorType::None:
         default:
             return nullptr;
