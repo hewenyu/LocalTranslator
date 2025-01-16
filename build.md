@@ -19,6 +19,10 @@ vcpkg install curl:x64-windows yaml-cpp:x64-windows nlohmann-json:x64-windows gt
 # C:\Users\boringsoft\code\microsoft\vcpkg\vcpkg.exe install --triplet=x64-windows
 ```
 
+```bash
+cd LocalTranslator/dep/onnxruntime && .\build.bat --config RelWithDebInfo --build_shared_lib --parallel --cmake_extra_defines CMAKE_INSTALL_PREFIX=C:/Users/boringsoft/code/hewenyu/LocalTranslator/dep/onnxruntime/install
+```
+
 ## 构建步骤
 
 1. 创建构建目录并生成项目文件：

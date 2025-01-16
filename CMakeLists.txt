@@ -13,8 +13,10 @@ if(MSVC)
 endif()
 
 # 设置 vcpkg toolchain
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/vcpkg/scripts/buildsystems/vcpkg.cmake"
-    CACHE STRING "Vcpkg toolchain file")
+if(WIN32)
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+        CACHE STRING "Vcpkg toolchain file")
+endif()
 
 # 设置库的查找路径
 if(WIN32)
@@ -40,7 +42,23 @@ find_package(yaml-cpp REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(GTest REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
-find_package(sentencepiece CONFIG REQUIRED)
+
+# 查找 sentencepiece
+if(WIN32)
+    find_library(SENTENCEPIECE_LIB sentencepiece 
+        PATHS ${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/x64-windows/lib
+        REQUIRED)
+    find_library(SENTENCEPIECE_TRAIN_LIB sentencepiece_train
+        PATHS ${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/x64-windows/lib
+        REQUIRED)
+else()
+    find_library(SENTENCEPIECE_LIB sentencepiece
+        PATHS ${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/x64-linux/lib
+        REQUIRED)
+    find_library(SENTENCEPIECE_TRAIN_LIB sentencepiece_train
+        PATHS ${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/x64-linux/lib
+        REQUIRED)
+endif()
 
 # 添加源文件
 add_library(translator
@@ -65,7 +83,7 @@ target_link_libraries(translator
     yaml-cpp::yaml-cpp
     nlohmann_json::nlohmann_json
     spdlog::spdlog
-    sentencepiece
+    ${SENTENCEPIECE_LIB}
     ${ONNXRUNTIME_LIB}
 )
 

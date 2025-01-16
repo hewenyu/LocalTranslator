@@ -1,3 +1,6 @@
 [submodule "dep/sentencepiece"]
 	path = dep/sentencepiece
 	url = https://github.com/hewenyu/sentencepiece.git
+[submodule "dep/onnxruntime"]
+	path = dep/onnxruntime
+	url = https://github.com/hewenyu/onnxruntime.git
