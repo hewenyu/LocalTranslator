@@ -8,6 +8,10 @@
     "gtest",
     "sentencepiece",
     "spdlog",
-    "benchmark"
+    "benchmark",
+    "tinyxml2",
+    "zlib",
+    "protobuf",
+    "abseil"
   ]
 } 
