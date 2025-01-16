@@ -75,24 +75,33 @@ struct BeamHypothesis {
 class CacheState {
 public:
     CacheState(int max_length, int hidden_size, int num_heads, int num_layers)
-        : max_length_(max_length), hidden_size_(hidden_size), num_heads_(num_heads),
+        : max_length_(max_length), hidden_size_(hidden_size), num_heads_(num_heads), num_layers_(num_layers),
           decoder_keys_(num_layers), decoder_values_(num_layers),
           encoder_keys_(num_layers), encoder_values_(num_layers) {}
 
-    Ort::Value get_decoder_key(int layer) const { return std::move(decoder_keys_[layer]); }
-    Ort::Value get_decoder_value(int layer) const { return std::move(decoder_values_[layer]); }
-    Ort::Value get_encoder_key(int layer) const { return std::move(encoder_keys_[layer]); }
-    Ort::Value get_encoder_value(int layer) const { return std::move(encoder_values_[layer]); }
+    // 移动构造函数
+    CacheState(CacheState&& other) noexcept = default;
+    // 移动赋值运算符
+    CacheState& operator=(CacheState&& other) noexcept = default;
+    // 删除复制构造函数和复制赋值运算符
+    CacheState(const CacheState&) = delete;
+    CacheState& operator=(const CacheState&) = delete;
 
-    void update_decoder_key(int layer, Ort::Value key) { decoder_keys_[layer] = std::move(key); }
-    void update_decoder_value(int layer, Ort::Value value) { decoder_values_[layer] = std::move(value); }
-    void update_encoder_key(int layer, Ort::Value key) { encoder_keys_[layer] = std::move(key); }
-    void update_encoder_value(int layer, Ort::Value value) { encoder_values_[layer] = std::move(value); }
+    Ort::Value&& get_decoder_key(int layer) { return std::move(decoder_keys_[layer]); }
+    Ort::Value&& get_decoder_value(int layer) { return std::move(decoder_values_[layer]); }
+    Ort::Value&& get_encoder_key(int layer) { return std::move(encoder_keys_[layer]); }
+    Ort::Value&& get_encoder_value(int layer) { return std::move(encoder_values_[layer]); }
+
+    void update_decoder_key(int layer, Ort::Value&& key) { decoder_keys_[layer] = std::move(key); }
+    void update_decoder_value(int layer, Ort::Value&& value) { decoder_values_[layer] = std::move(value); }
+    void update_encoder_key(int layer, Ort::Value&& key) { encoder_keys_[layer] = std::move(key); }
+    void update_encoder_value(int layer, Ort::Value&& value) { encoder_values_[layer] = std::move(value); }
 
 private:
     int max_length_;
     int hidden_size_;
     int num_heads_;
+    int num_layers_;
     std::vector<Ort::Value> decoder_keys_;
     std::vector<Ort::Value> decoder_values_;
     std::vector<Ort::Value> encoder_keys_;

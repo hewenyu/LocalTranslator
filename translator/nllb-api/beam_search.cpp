@@ -205,7 +205,7 @@ std::vector<BeamHypothesis> BeamSearchDecoder::decode(
         hypotheses.emplace_back(std::vector<int64_t>{bos_token_id}, 0.0f);
 
         // 初始化缓存状态
-        CacheState cache(config_.max_length, 1024, 16);  // hidden_size和num_heads需要从模型配置中获取
+        CacheState cache(config_.max_length, 1024, 16, 24);  // 使用标准的NLLB-200模型配置
 
         // 提前停止的计数器
         int no_improvement_steps = 0;
