@@ -44,17 +44,14 @@ private:
     int64_t bos_id_ = 1;
     int64_t unk_id_ = 3;
 
-    // Dictionary length
-    static constexpr int DICTIONARY_LENGTH = 256000;
-
-    // NLLB supported languages
-    static constexpr size_t NLLB_LANGUAGES_COUNT = 200;  // 实际语言数量
-    static const std::array<const char*, NLLB_LANGUAGES_COUNT> NLLB_LANGUAGES;
-
-    // Helper methods
+    // Add language tokens to text
     std::string add_language_tokens(const std::string& text,
                                   const std::string& source_lang,
                                   const std::string& target_lang) const;
+
+    // NLLB supported languages
+    static constexpr size_t NLLB_LANGUAGES_COUNT = 200;  // 更新为实际支持的语言数量
+    static const std::array<const char*, NLLB_LANGUAGES_COUNT> NLLB_LANGUAGES;
 };
 
 } // namespace nllb 

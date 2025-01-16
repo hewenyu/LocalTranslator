@@ -127,8 +127,9 @@ void NLLBTranslator::initialize_language_codes() {
         tinyxml2::XMLDocument doc;
         auto result = doc.LoadFile(lang_file.c_str());
         if (result != tinyxml2::XML_SUCCESS) {
-            spdlog::error("Failed to load XML file: {} (Error code: {})", lang_file, result);
-            throw std::runtime_error("Failed to load XML file: " + lang_file);
+            std::string error_msg = "Failed to load XML file: " + lang_file;
+            spdlog::error(error_msg);
+            throw std::runtime_error(error_msg);
         }
 
         auto root = doc.FirstChildElement("languages");
