@@ -1,0 +1,14 @@
+# Translator Configuration Template
+# Choose one of: DeepLX, NLLB, None
+type: DeepLX
+
+# DeepLX Configuration
+deeplx:
+  url: "http://localhost:1188"      # DeepLX service URL
+  token: ""                         # Optional: Authentication token
+  target_lang: "ZH"                 # Target language (default: ZH)
+
+# NLLB Configuration
+nllb:
+  model_path: "./models/nllb"       # Path to NLLB model
+  target_lang: "ZH"                 # Target language (default: ZH) 
