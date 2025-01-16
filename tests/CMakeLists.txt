@@ -8,7 +8,7 @@ find_package(GTest REQUIRED)
 
 # 添加测试可执行文件
 add_executable(translator_test translator_test.cpp)
-add_executable(deeplx_translator_test deeplx_translator_test.cpp)
+add_executable(nllb_translator_test nllb_translator_test.cpp)
 
 # 链接 GTest 和项目库
 target_link_libraries(translator_test
@@ -18,11 +18,13 @@ target_link_libraries(translator_test
     translator
 )
 
-target_link_libraries(deeplx_translator_test
+target_link_libraries(nllb_translator_test
     PRIVATE
+    translator
     GTest::GTest
     GTest::Main
-    translator
+    spdlog::spdlog
+    yaml-cpp
 )
 
 # 复制 DLL 到输出目录
@@ -39,11 +41,11 @@ if(WIN32)
     file(GLOB DEBUG_DLLS "${DLL_DEBUG_DIR}/*.dll")
     file(COPY ${DEBUG_DLLS} DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/Debug")
     
-    # 为每个测试目标设置工作目录
+    # 为测试目标设置工作目录
     set_target_properties(translator_test PROPERTIES
         VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Debug"
     )
-    set_target_properties(deeplx_translator_test PROPERTIES
+    set_target_properties(nllb_translator_test PROPERTIES
         VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Debug"
     )
 endif()
@@ -54,8 +56,9 @@ add_test(
     COMMAND translator_test
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Debug"
 )
+
 add_test(
-    NAME DeepLXTranslatorTest
-    COMMAND deeplx_translator_test
+    NAME NLLBTranslatorTest
+    COMMAND nllb_translator_test
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Debug"
 ) 

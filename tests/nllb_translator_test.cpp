@@ -1,135 +1,147 @@
 #include <gtest/gtest.h>
-#include <filesystem>
-#include <fstream>
+#include <spdlog/spdlog.h>
 #include "translator/nllb-api/nllb_translator.h"
+#include "common/common.h"
 
-namespace local_translator {
-namespace {
+using namespace nllb;
 
 class NLLBTranslatorTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // 创建必要的目录
-        std::filesystem::create_directories("models");
+        // 设置日志级别
+        spdlog::set_level(spdlog::level::debug);
         
-        // 创建配置文件
-        std::ofstream config_file("models/model_config.yaml");
-        config_file << "hidden_size: 1024\n"
-                   << "num_heads: 16\n"
-                   << "vocab_size: 256200\n"
-                   << "max_position_embeddings: 1024\n"
-                   << "encoder_layers: 24\n"
-                   << "decoder_layers: 24\n";
-        config_file.close();
+        // 配置翻译器
+        common::TranslatorConfig config;
+        config.nllb.model_dir = "models/nllb";  // 确保这个路径存在并包含所需模型文件
+        config.nllb.target_lang = "eng_Latn";   // 默认目标语言为英语
+        config.nllb.params.beam_size = 5;
+        config.nllb.params.max_length = 128;
+        config.nllb.params.length_penalty = 1.0f;
+        config.nllb.params.temperature = 1.0f;
+        config.nllb.params.num_threads = 4;
+        config.nllb.model_files.tokenizer_vocab = "sentencepiece_bpe.model";
+        
+        // 创建翻译器实例
+        translator = std::make_unique<NLLBTranslator>(config);
     }
 
     void TearDown() override {
-        // 清理测试文件
-        std::filesystem::remove("models/model_config.yaml");
+        translator.reset();
     }
 
-    // 辅助函数：检查翻译器初始化
-    void CheckTranslatorInit(const std::string& target_lang, bool should_succeed) {
-        NLLBTranslator translator;
-        auto status = translator.Init(target_lang);
-        if (should_succeed) {
-            EXPECT_TRUE(status.ok()) << status.message();
-        } else {
-            EXPECT_FALSE(status.ok());
-        }
-    }
+    std::unique_ptr<NLLBTranslator> translator;
 };
 
-// 测试初始化
-TEST_F(NLLBTranslatorTest, InitializationTest) {
-    // 测试有效的目标语言
-    CheckTranslatorInit("eng_Latn", true);
-    CheckTranslatorInit("zho_Hans", true);
+// 测试基本翻译功能
+TEST_F(NLLBTranslatorTest, BasicTranslation) {
+    const std::string input = "Hello, how are you?";
+    const std::string source_lang = "eng_Latn";
     
-    // 测试无效的目标语言
-    CheckTranslatorInit("invalid_lang", false);
-    CheckTranslatorInit("", false);
-}
-
-// 测试语言代码转换
-TEST_F(NLLBTranslatorTest, LanguageCodeConversionTest) {
-    NLLBTranslator translator;
-    
-    // 测试有效的语言代码转换
-    EXPECT_EQ(translator.ConvertLanguageCode("zh"), "zho_Hans");
-    EXPECT_EQ(translator.ConvertLanguageCode("en"), "eng_Latn");
-    
-    // 测试无效的语言代码
-    EXPECT_EQ(translator.ConvertLanguageCode("invalid"), "");
-    EXPECT_EQ(translator.ConvertLanguageCode(""), "");
-}
-
-// 测试配置验证
-TEST_F(NLLBTranslatorTest, ConfigValidationTest) {
-    NLLBTranslator translator;
-    
-    // 测试无效的 beam size
-    EXPECT_FALSE(translator.SetBeamSize(0).ok());
-    EXPECT_FALSE(translator.SetBeamSize(-1).ok());
-    EXPECT_TRUE(translator.SetBeamSize(5).ok());
-    
-    // 测试无效的温度参数
-    EXPECT_FALSE(translator.SetTemperature(-0.1).ok());
-    EXPECT_FALSE(translator.SetTemperature(0).ok());
-    EXPECT_TRUE(translator.SetTemperature(0.8).ok());
-}
-
-// 测试翻译 API
-TEST_F(NLLBTranslatorTest, TranslationTest) {
-    NLLBTranslator translator;
-    ASSERT_TRUE(translator.Init("eng_Latn").ok());
-    
-    // 测试空输入
-    std::string result;
-    auto status = translator.Translate("", "zho_Hans", result);
-    EXPECT_FALSE(status.ok());
-    EXPECT_TRUE(result.empty());
-    
-    // 测试无效的源语言
-    status = translator.Translate("测试文本", "invalid_lang", result);
-    EXPECT_FALSE(status.ok());
-    
-    // 测试实际翻译会抛出异常（因为没有实际的模型文件）
     try {
-        status = translator.Translate("测试文本", "zho_Hans", result);
-        EXPECT_FALSE(status.ok());
+        std::string result = translator->translate(input, source_lang);
+        EXPECT_FALSE(result.empty());
+        spdlog::info("Translation result: {}", result);
     } catch (const std::exception& e) {
-        EXPECT_TRUE(std::string(e.what()).find("model") != std::string::npos);
+        FAIL() << "Translation failed: " << e.what();
     }
 }
 
-// 测试缓存状态
-TEST_F(NLLBTranslatorTest, CacheStateTest) {
-    NLLBTranslator translator;
-    ASSERT_TRUE(translator.Init("eng_Latn").ok());
+// 测试中文到英文的翻译
+TEST_F(NLLBTranslatorTest, ChineseToEnglish) {
+    const std::string input = "你好，最近过得怎么样？";
+    const std::string source_lang = "zho_Hans";
     
-    // 测试禁用缓存
-    EXPECT_TRUE(translator.DisableCache().ok());
-    
-    std::string result;
-    auto status = translator.Translate("test", "zho_Hans", result);
-    EXPECT_FALSE(status.ok()); // 应该失败，因为没有实际的模型文件
+    try {
+        std::string result = translator->translate(input, source_lang);
+        EXPECT_FALSE(result.empty());
+        spdlog::info("Chinese to English: {}", result);
+    } catch (const std::exception& e) {
+        FAIL() << "Chinese to English translation failed: " << e.what();
+    }
 }
 
-// 测试性能监控
-TEST_F(NLLBTranslatorTest, PerformanceTest) {
-    NLLBTranslator translator;
-    ASSERT_TRUE(translator.Init("eng_Latn").ok());
+// 测试长文本翻译
+TEST_F(NLLBTranslatorTest, LongTextTranslation) {
+    const std::string input = "This is a long text that needs to be translated. "
+                             "It contains multiple sentences and should test the model's "
+                             "ability to handle longer sequences. The translation should "
+                             "maintain coherence across sentences and properly handle "
+                             "context throughout the text.";
+    const std::string source_lang = "eng_Latn";
     
-    // 记录翻译尝试的时间
-    auto start = std::chrono::high_resolution_clock::now();
-    std::string result;
-    translator.Translate("test", "zho_Hans", result);
-    auto end = std::chrono::high_resolution_clock::now();
-    
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    EXPECT_GT(duration.count(), 0);
+    try {
+        std::string result = translator->translate(input, source_lang);
+        EXPECT_FALSE(result.empty());
+        spdlog::info("Long text translation result: {}", result);
+    } catch (const std::exception& e) {
+        FAIL() << "Long text translation failed: " << e.what();
+    }
 }
 
-} // namespace
-} // namespace local_translator 
+// 测试特殊字符处理
+TEST_F(NLLBTranslatorTest, SpecialCharacters) {
+    const std::string input = "Hello! @#$%^&* 你好！";
+    const std::string source_lang = "eng_Latn";
+    
+    try {
+        std::string result = translator->translate(input, source_lang);
+        EXPECT_FALSE(result.empty());
+        spdlog::info("Special characters translation: {}", result);
+    } catch (const std::exception& e) {
+        FAIL() << "Special characters translation failed: " << e.what();
+    }
+}
+
+// 测试错误处理 - 无效的源语言
+TEST_F(NLLBTranslatorTest, InvalidSourceLanguage) {
+    const std::string input = "Hello";
+    const std::string invalid_lang = "invalid_lang";
+    
+    EXPECT_THROW(translator->translate(input, invalid_lang), std::runtime_error);
+}
+
+// 测试空输入
+TEST_F(NLLBTranslatorTest, EmptyInput) {
+    const std::string input = "";
+    const std::string source_lang = "eng_Latn";
+    
+    try {
+        std::string result = translator->translate(input, source_lang);
+        EXPECT_TRUE(result.empty());
+    } catch (const std::exception& e) {
+        FAIL() << "Empty input handling failed: " << e.what();
+    }
+}
+
+// 测试多语言切换
+TEST_F(NLLBTranslatorTest, MultiLanguageSwitch) {
+    struct TestCase {
+        std::string input;
+        std::string source_lang;
+        std::string description;
+    };
+
+    std::vector<TestCase> test_cases = {
+        {"Hello, world!", "eng_Latn", "English"},
+        {"你好，世界！", "zho_Hans", "Chinese"},
+        {"Bonjour le monde!", "fra_Latn", "French"},
+        {"こんにちは、世界！", "jpn_Jpan", "Japanese"}
+    };
+
+    for (const auto& test : test_cases) {
+        try {
+            std::string result = translator->translate(test.input, test.source_lang);
+            EXPECT_FALSE(result.empty());
+            spdlog::info("{} translation result: {}", test.description, result);
+        } catch (const std::exception& e) {
+            FAIL() << test.description << " translation failed: " << e.what();
+        }
+    }
+}
+
+// 测试目标语言获取
+TEST_F(NLLBTranslatorTest, GetTargetLanguage) {
+    std::string target_lang = translator->get_target_language();
+    EXPECT_EQ(target_lang, "eng_Latn");
+} 
