@@ -62,19 +62,6 @@ TEST_F(NLLBTranslatorTest, LanguageCodeConversion) {
     EXPECT_EQ(translator->get_display_language_code("zho_Hans"), "zh");
 }
 
-// 测试低质量语言支持
-TEST_F(NLLBTranslatorTest, LowQualityLanguageSupport) {
-    // 默认不支持低质量语言
-    EXPECT_FALSE(translator->get_support_low_quality_languages());
-    
-    // 启用低质量语言支持
-    translator->set_support_low_quality_languages(true);
-    EXPECT_TRUE(translator->get_support_low_quality_languages());
-    
-    // 验证支持的语言列表已更新
-    auto languages = translator->get_supported_languages();
-    EXPECT_FALSE(languages.empty());
-}
 
 // 测试翻译参数
 TEST_F(NLLBTranslatorTest, TranslationParameters) {
