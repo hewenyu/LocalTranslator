@@ -51,7 +51,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # ONNX Runtime设置
 if(WIN32)
-    set(ONNXRUNTIME_ROOT "${CMAKE_SOURCE_DIR}/onnxruntime/onnxruntime-win-x64")
+    set(ONNXRUNTIME_ROOT "${CMAKE_SOURCE_DIR}/onnxruntime/onnxruntime-win-x64-1.19.0")
     set(ONNXRUNTIME_LIB "${ONNXRUNTIME_ROOT}/lib/onnxruntime.lib")
     set(ONNXRUNTIME_DLL "${ONNXRUNTIME_ROOT}/lib/onnxruntime.dll")
 else()
