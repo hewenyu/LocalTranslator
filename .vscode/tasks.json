@@ -7,12 +7,27 @@
             "command": "cmake",
             "args": [
                 "-B",
-                "${workspaceFolder}/build",
+                "build",
                 "-S",
-                "${workspaceFolder}",
+                ".",
+                "-G",
+                "MinGW Makefiles",
                 "-DCMAKE_BUILD_TYPE=Debug",
-                "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+                "-DCMAKE_CXX_COMPILER=gcc",
+                "-DCMAKE_C_COMPILER=gcc",
+                "-DCMAKE_MAKE_PROGRAM=mingw32-make",
+                "-DCMAKE_PREFIX_PATH=${workspaceFolder}/vcpkg_installed/x64-windows",
+                "-DCMAKE_FIND_ROOT_PATH=${workspaceFolder}/vcpkg_installed/x64-windows",
+                "-DCMAKE_LIBRARY_PATH=${workspaceFolder}/vcpkg_installed/x64-windows/lib",
+                "-DCMAKE_INCLUDE_PATH=${workspaceFolder}/vcpkg_installed/x64-windows/include",
+                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
             ],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PATH": "C:\\msys64\\mingw64\\bin;${env:PATH}"
+                }
+            },
             "problemMatcher": [],
             "group": "build"
         },
@@ -22,11 +37,20 @@
             "command": "cmake",
             "args": [
                 "--build",
-                "${workspaceFolder}/build",
+                "build",
                 "--config",
-                "Debug"
+                "Debug",
+                "--parallel",
+                "--",
+                "-j8"
             ],
-            "problemMatcher": "$msCompile",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PATH": "C:\\msys64\\mingw64\\bin;${env:PATH}"
+                }
+            },
+            "problemMatcher": "$gcc",
             "group": {
                 "kind": "build",
                 "isDefault": true

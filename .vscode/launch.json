@@ -3,26 +3,54 @@
     "configurations": [
         {
             "name": "Debug Tests",
-            "type": "cppvsdbg",
+            "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/bin/Debug/nllb_translator_test.exe",
+            "program": "${workspaceFolder}/build/tests/nllb_translator_test.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
-            "environment": [],
-            "console": "integratedTerminal",
+            "environment": [
+                {
+                    "name": "PATH",
+                    "value": "C:/msys64/mingw64/bin;${env:PATH}"
+                }
+            ],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:/msys64/mingw64/bin/gdb.exe",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
             "preLaunchTask": "CMake Build"
         },
         {
             "name": "Debug Benchmark",
-            "type": "cppvsdbg",
+            "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/bin/Debug/nllb_translator_benchmark.exe",
+            "program": "${workspaceFolder}/build/tests/nllb_translator_benchmark.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
-            "environment": [],
-            "console": "integratedTerminal",
+            "environment": [
+                {
+                    "name": "PATH",
+                    "value": "C:/msys64/mingw64/bin;${env:PATH}"
+                }
+            ],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:/msys64/mingw64/bin/gdb.exe",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
             "preLaunchTask": "CMake Build"
         }
     ]
