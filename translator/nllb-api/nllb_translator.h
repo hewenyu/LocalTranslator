@@ -24,6 +24,13 @@ public:
                          const std::string& source_lang) const override;
     std::string get_target_language() const override;
     
+    // Language support methods
+    bool is_language_supported(const std::string& lang_code) const;
+    bool needs_translation(const std::string& source_lang) const;
+    void set_support_low_quality_languages(bool support);
+    bool get_support_low_quality_languages() const;
+    std::vector<std::string> get_supported_languages() const;
+
     // Batch translation
     std::vector<std::string> translate_batch(
         const std::vector<std::string>& texts,
@@ -52,7 +59,7 @@ private:
     Ort::MemoryInfo memory_info_;
     std::unique_ptr<Ort::Session> encoder_session_;
     std::unique_ptr<Ort::Session> decoder_session_;
-    std::unique_ptr<Ort::Session> cache_init_session_;
+    std::unique_ptr<Ort::Session> cache_initializer_session_;
     std::unique_ptr<Ort::Session> embed_lm_head_session_;
 
     // Core components
@@ -98,6 +105,10 @@ private:
     std::string normalize_language_code(const std::string& lang_code) const;
     std::string get_nllb_language_code(const std::string& lang_code) const;
     std::string get_display_language_code(const std::string& nllb_code) const;
+    Ort::Value create_tensor(const std::vector<int64_t>& data, 
+                            const std::vector<int64_t>& shape) const;
+    Ort::Value create_tensor(const std::vector<float>& data, 
+                            const std::vector<int64_t>& shape) const;
 };
 
 } // namespace nllb 

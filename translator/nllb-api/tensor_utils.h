@@ -4,56 +4,54 @@
 #include <onnxruntime_cxx_api.h>
 
 namespace nllb {
+namespace TensorUtils {
 
-class TensorUtils {
-public:
-    template<typename T>
-    static Ort::Value createTensor(
-        const Ort::MemoryInfo& memory_info,
-        const std::vector<T>& data,
-        const std::vector<int64_t>& shape) {
-        
-        return Ort::Value::CreateTensor<T>(
-            memory_info,
-            const_cast<T*>(data.data()),
-            data.size(),
-            shape.data(),
-            shape.size()
-        );
-    }
+// Create int64 tensor from vector
+inline Ort::Value createInt64Tensor(
+    const Ort::MemoryInfo& memory_info,
+    const std::vector<int64_t>& data,
+    const std::vector<int64_t>& shape) {
+    
+    return Ort::Value::CreateTensor<int64_t>(
+        memory_info,
+        const_cast<int64_t*>(data.data()),
+        data.size(),
+        shape.data(),
+        shape.size()
+    );
+}
 
-    static Ort::Value createInt64Tensor(
-        const Ort::MemoryInfo& memory_info,
-        const std::vector<int64_t>& data,
-        const std::vector<int64_t>& shape) {
-        
-        return createTensor<int64_t>(memory_info, data, shape);
-    }
+// Create float tensor from vector
+inline Ort::Value createFloatTensor(
+    const Ort::MemoryInfo& memory_info,
+    const std::vector<float>& data,
+    const std::vector<int64_t>& shape) {
+    
+    return Ort::Value::CreateTensor<float>(
+        memory_info,
+        const_cast<float*>(data.data()),
+        data.size(),
+        shape.data(),
+        shape.size()
+    );
+}
 
-    static Ort::Value createFloatTensor(
-        const Ort::MemoryInfo& memory_info,
-        const std::vector<float>& data,
-        const std::vector<int64_t>& shape) {
-        
-        return createTensor<float>(memory_info, data, shape);
-    }
+// Get tensor data as vector
+template<typename T>
+inline std::vector<T> getTensorData(const Ort::Value& tensor) {
+    auto tensor_info = tensor.GetTensorTypeAndShapeInfo();
+    size_t elem_count = tensor_info.GetElementCount();
+    std::vector<T> result(elem_count);
+    
+    std::copy_n(tensor.GetTensorData<T>(), elem_count, result.begin());
+    return result;
+}
 
-    template<typename T>
-    static std::vector<T> getTensorData(const Ort::Value& tensor) {
-        auto tensor_info = tensor.GetTensorTypeAndShapeInfo();
-        size_t total_elements = tensor_info.GetElementCount();
-        std::vector<T> data(total_elements);
-        
-        const T* tensor_data = tensor.GetTensorData<T>();
-        std::copy(tensor_data, tensor_data + total_elements, data.begin());
-        
-        return data;
-    }
+// Get tensor shape
+inline std::vector<int64_t> getTensorShape(const Ort::Value& tensor) {
+    auto tensor_info = tensor.GetTensorTypeAndShapeInfo();
+    return tensor_info.GetShape();
+}
 
-    static std::vector<int64_t> getTensorShape(const Ort::Value& tensor) {
-        auto tensor_info = tensor.GetTensorTypeAndShapeInfo();
-        return tensor_info.GetShape();
-    }
-};
-
+} // namespace TensorUtils
 } // namespace nllb 

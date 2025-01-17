@@ -1,36 +1,56 @@
 #include "cache_container.h"
 #include "tensor_utils.h"
+#include <stdexcept>
 
 namespace nllb {
 
-void CacheContainer::initializeCache(const Ort::MemoryInfo& memory_info,
-                                   const std::vector<int64_t>& shape) {
-    memory_info_ = memory_info;
-    shape_ = shape;
-    cache_.clear();
-
-    // Initialize cache tensors with zeros
-    std::vector<float> zeros(shape_[0] * shape_[1] * shape_[2] * shape_[3], 0.0f);
+void CacheContainer::initialize(
+    Ort::Session& cache_init_session,
+    const Ort::MemoryInfo& memory_info,
+    const std::vector<float>& encoder_output,
+    const std::vector<int64_t>& encoder_shape) {
     
-    // Create key and value tensors for each layer
-    for (int i = 0; i < 12; ++i) { // 12 layers in NLLB model
-        // Key tensor
-        cache_.push_back(Ort::Value::CreateTensor<float>(
-            memory_info_, zeros.data(), zeros.size(), shape_.data(), shape_.size()
-        ));
+    try {
+        // Create input tensor
+        auto input_tensor = TensorUtils::createFloatTensor(
+            memory_info,
+            encoder_output,
+            encoder_shape
+        );
         
-        // Value tensor
-        cache_.push_back(Ort::Value::CreateTensor<float>(
-            memory_info_, zeros.data(), zeros.size(), shape_.data(), shape_.size()
-        ));
+        // Run cache initialization
+        std::vector<Ort::Value> inputs;
+        inputs.push_back(std::move(input_tensor));
+        
+        const char* input_names[] = {"encoder_output"};
+        const char* output_names[] = {"key_values"};
+        
+        auto outputs = cache_init_session.Run(
+            Ort::RunOptions{nullptr},
+            input_names,
+            inputs.data(),
+            inputs.size(),
+            output_names,
+            1
+        );
+        
+        // Store cache
+        cache_ = std::move(outputs);
+        
+    } catch (const Ort::Exception& e) {
+        throw std::runtime_error("Failed to initialize cache: " + std::string(e.what()));
     }
 }
 
-void CacheContainer::updateCache(std::vector<Ort::Value>& new_cache) {
-    if (new_cache.size() != cache_.size()) {
-        throw std::runtime_error("Cache size mismatch in update");
+void CacheContainer::add_cache_to_inputs(std::vector<Ort::Value>& inputs) const {
+    if (!cache_.empty()) {
+        inputs.insert(inputs.end(), cache_.begin(), cache_.end());
     }
-    cache_ = std::move(new_cache);
+}
+
+void CacheContainer::update_cache(const Ort::Value& new_cache) {
+    cache_.clear();
+    cache_.push_back(new_cache);
 }
 
 } // namespace nllb 

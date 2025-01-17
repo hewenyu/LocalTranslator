@@ -3,13 +3,13 @@
 namespace translator {
 
 enum class TranslatorError {
-    NO_ERROR = 0,
-    ERROR_INIT = 1,
-    ERROR_ENCODE = 2,
-    ERROR_DECODE = 3,
-    ERROR_INVALID_PARAM = 4,
-    ERROR_TOKENIZE = 5,
-    ERROR_UNSUPPORTED_LANGUAGE = 6
+    OK = 0,                         // No error
+    ERROR_INIT = 1,                 // Initialization error
+    ERROR_ENCODE = 2,               // Encoding error
+    ERROR_DECODE = 3,               // Decoding error
+    ERROR_INVALID_PARAM = 4,        // Invalid parameter
+    ERROR_TOKENIZE = 5,             // Tokenization error
+    ERROR_UNSUPPORTED_LANGUAGE = 6  // Unsupported language
 };
 
 } // namespace translator 
