@@ -415,19 +415,19 @@ std::vector<std::string> NLLBTranslator::translate_batch(
         std::vector<std::string> results(texts.size());
         std::vector<std::future<void>> futures;
         
-        const int num_threads = std::min(
+        const size_t num_threads = std::min(
             static_cast<size_t>(std::thread::hardware_concurrency()),
             texts.size()
         );
         
         std::vector<std::unique_ptr<CacheContainer>> thread_caches(num_threads);
-        for (int i = 0; i < num_threads; ++i) {
+        for (size_t i = 0; i < num_threads; ++i) {
             thread_caches[i] = std::make_unique<CacheContainer>();
         }
         
         // 分配工作给线程
         for (size_t i = 0; i < texts.size(); i += num_threads) {
-            for (int t = 0; t < num_threads && (i + t) < texts.size(); ++t) {
+            for (size_t t = 0; t < num_threads && (i + t) < texts.size(); ++t) {
                 futures.push_back(std::async(std::launch::async,
                     [this, i, t, &batch_encoder_output, &results, &thread_caches, &batch_tokens]() {
                         const size_t idx = i + t;

@@ -10,6 +10,6 @@ namespace nllb {
 BeamSearchDecoder::BeamSearchDecoder(int beam_size, float length_penalty, float eos_token_id)
     : beam_size_(beam_size)
     , length_penalty_(length_penalty)
-    , eos_token_id_(eos_token_id) {}
+    , eos_token_id_(static_cast<int64_t>(eos_token_id)) {}
 
 } // namespace nllb 
