@@ -1,232 +1,238 @@
 #include "beam_search.h"
+#include "tensor_utils.h"
 #include <algorithm>
 #include <cmath>
-#include <numeric>
 #include <queue>
-#include "tensor_utils.h"
 
 namespace nllb {
 
 BeamSearchDecoder::BeamSearchDecoder(
-    int beam_size, int max_length, float length_penalty,
-    float temperature, float top_k, float top_p,
-    float repetition_penalty)
-    : beam_size_(beam_size),
-      max_length_(max_length),
-      length_penalty_(length_penalty),
-      temperature_(temperature),
-      top_k_(top_k),
-      top_p_(top_p),
-      repetition_penalty_(repetition_penalty) {}
+    int beam_size,
+    float length_penalty,
+    int64_t eos_token_id)
+    : beam_size_(beam_size)
+    , length_penalty_(length_penalty)
+    , eos_token_id_(eos_token_id) {}
 
 std::vector<BeamHypothesis> BeamSearchDecoder::decode(
-    Ort::Session* decoder_session,
+    Ort::Session& decoder_session,
+    Ort::Session& embed_lm_head_session,
     const Ort::MemoryInfo& memory_info,
     const std::vector<float>& encoder_output,
+    const std::vector<int64_t>& encoder_shape,
     CacheContainer& cache_container,
-    const TokenizerResult& input_tokens,
-    int eos_token_id) const {
+    const ModelParams& params) const {
     
     std::vector<BeamHypothesis> hypotheses(beam_size_);
-    std::vector<int64_t> current_tokens(beam_size_, eos_token_id);
-    bool all_done = false;
-    int current_length = 0;
-
-    while (!all_done && current_length < max_length_) {
-        // 准备解码器输入
-        auto input_tensor = TensorUtils::createInt64Tensor(
-            memory_info, current_tokens,
-            {1, static_cast<int64_t>(current_tokens.size())});
-
-        // 运行解码器
-        const char* input_names[] = {
-            "input_ids",
-            "encoder_hidden_states",
-            "key_cache",
-            "value_cache"
-        };
-
-        std::vector<Ort::Value> ort_inputs;
-        ort_inputs.reserve(4);
-        ort_inputs.push_back(std::move(input_tensor));
+    std::vector<std::vector<int64_t>> beam_tokens(beam_size_, std::vector<int64_t>{});
+    std::vector<float> beam_scores(beam_size_, 0.0f);
+    
+    // Initialize with start token
+    for (int i = 0; i < beam_size_; ++i) {
+        beam_tokens[i].push_back(tokenizer_->bos_id());
+    }
+    
+    bool is_done = false;
+    int cur_len = 1;
+    
+    while (!is_done && cur_len < params.max_length) {
+        std::vector<int64_t> next_token_logits;
         
-        auto encoder_tensor = TensorUtils::createFloatTensor(
-            memory_info, encoder_output, 
-            {1, static_cast<int64_t>(input_tokens.size()), 1024});
-        ort_inputs.push_back(std::move(encoder_tensor));
-        
-        auto key_cache = cache_container.get_key_cache();
-        auto value_cache = cache_container.get_value_cache();
-        ort_inputs.push_back(std::move(key_cache));
-        ort_inputs.push_back(std::move(value_cache));
-
-        const char* output_names[] = {"logits", "new_key_cache", "new_value_cache"};
-        
-        auto outputs = decoder_session->Run(
-            Ort::RunOptions{nullptr},
-            input_names,
-            ort_inputs.data(),
-            ort_inputs.size(),
-            output_names,
-            3
-        );
-
-        // 更新缓存
-        cache_container.update(std::move(outputs[1]), std::move(outputs[2]));
-
-        // 处理 logits
-        auto logits = TensorUtils::getTensorData<float>(outputs[0]);
-        auto scores = apply_repetition_penalty(logits, current_tokens);
-        scores = apply_temperature(scores);
-        scores = apply_top_k_top_p(scores);
-
-        // 为每个假设选择下一个 token
-        for (int i = 0; i < beam_size_; ++i) {
-            if (hypotheses[i].is_done) continue;
-
-            // 获取当前假设的分数
-            size_t offset = i * scores.size() / beam_size_;
-            std::vector<float> current_scores(
-                scores.begin() + offset,
-                scores.begin() + offset + scores.size() / beam_size_
+        // Run decoder step
+        {
+            auto input_tensor = TensorUtils::createInt64Tensor(
+                memory_info,
+                beam_tokens.back(),
+                {1, static_cast<int64_t>(beam_tokens.back().size())}
             );
-
-            // 找到最佳 token
-            auto max_it = std::max_element(current_scores.begin(), current_scores.end());
-            int64_t next_token = std::distance(current_scores.begin(), max_it);
-            float next_score = *max_it;
-
-            // 更新假设
-            hypotheses[i].tokens.push_back(next_token);
-            hypotheses[i].score += next_score;
-            current_tokens[i] = next_token;
-
-            // 检查是否完成
-            if (next_token == eos_token_id || 
-                hypotheses[i].tokens.size() >= static_cast<size_t>(max_length_)) {
-                hypotheses[i].is_done = true;
+            
+            std::vector<Ort::Value> decoder_inputs;
+            decoder_inputs.push_back(std::move(input_tensor));
+            decoder_inputs.push_back(TensorUtils::createFloatTensor(
+                memory_info,
+                encoder_output,
+                encoder_shape
+            ));
+            
+            cache_container.addCacheToInputs(decoder_inputs);
+            
+            const char* input_names[] = {"input_ids", "encoder_output", "past_key_values"};
+            const char* output_names[] = {"logits", "present_key_values"};
+            
+            auto outputs = decoder_session.Run(
+                Ort::RunOptions{nullptr},
+                input_names,
+                decoder_inputs.data(),
+                decoder_inputs.size(),
+                output_names,
+                2
+            );
+            
+            next_token_logits = TensorUtils::getTensorData<float>(outputs[0]);
+            cache_container.updateCache(outputs[1]);
+        }
+        
+        // Get scores for next tokens
+        auto next_token_scores = compute_next_token_scores(
+            next_token_logits,
+            beam_tokens.back(),
+            params.temperature,
+            params.repetition_penalty,
+            params.top_k,
+            params.top_p
+        );
+        
+        // Get top-k tokens and their scores
+        std::vector<std::pair<float, int64_t>> token_scores;
+        for (size_t i = 0; i < next_token_scores.size(); ++i) {
+            token_scores.emplace_back(next_token_scores[i], i);
+        }
+        
+        std::partial_sort(
+            token_scores.begin(),
+            token_scores.begin() + beam_size_,
+            token_scores.end(),
+            std::greater<>()
+        );
+        
+        // Update beam hypotheses
+        std::vector<std::vector<int64_t>> next_beam_tokens;
+        std::vector<float> next_beam_scores;
+        
+        for (int i = 0; i < beam_size_; ++i) {
+            auto [score, token] = token_scores[i];
+            auto new_tokens = beam_tokens[i];
+            new_tokens.push_back(token);
+            
+            float sequence_score = beam_scores[i] + score;
+            
+            if (token == eos_token_id_) {
+                float normalized_score = sequence_score / std::pow(new_tokens.size(), length_penalty_);
+                hypotheses[i] = {new_tokens, normalized_score, true};
+            } else {
+                next_beam_tokens.push_back(std::move(new_tokens));
+                next_beam_scores.push_back(sequence_score);
             }
         }
-
-        // 检查是否所有假设都完成
-        all_done = true;
-        for (const auto& hyp : hypotheses) {
-            if (!hyp.is_done) {
-                all_done = false;
-                break;
-            }
+        
+        // Check if all hypotheses are done
+        is_done = std::all_of(
+            hypotheses.begin(),
+            hypotheses.end(),
+            [](const auto& h) { return h.is_done; }
+        );
+        
+        if (!is_done) {
+            beam_tokens = std::move(next_beam_tokens);
+            beam_scores = std::move(next_beam_scores);
+            ++cur_len;
         }
-
-        current_length++;
     }
-
-    // 应用长度惩罚并排序假设
-    for (auto& hyp : hypotheses) {
-        hyp.score = compute_sequence_score(hyp.tokens);
+    
+    // Normalize scores for incomplete sequences
+    for (size_t i = 0; i < hypotheses.size(); ++i) {
+        if (!hypotheses[i].is_done) {
+            hypotheses[i].tokens = beam_tokens[i];
+            hypotheses[i].score = beam_scores[i] / std::pow(beam_tokens[i].size(), length_penalty_);
+            hypotheses[i].is_done = true;
+        }
     }
-
-    std::sort(hypotheses.begin(), hypotheses.end(),
-              [](const BeamHypothesis& a, const BeamHypothesis& b) {
-                  return a.score > b.score;
-              });
-
+    
     return hypotheses;
 }
 
-std::vector<float> BeamSearchDecoder::apply_repetition_penalty(
-    std::vector<float>& scores,
-    const std::vector<int64_t>& input_ids) const {
+std::vector<float> BeamSearchDecoder::compute_next_token_scores(
+    const std::vector<float>& logits,
+    const std::vector<int64_t>& current_tokens,
+    float temperature,
+    float repetition_penalty,
+    float top_k,
+    float top_p) const {
     
-    std::vector<float> penalized_scores = scores;
+    std::vector<float> scores = logits;
     
-    // 对已生成的 token 应用重复惩罚
-    for (const auto& token : input_ids) {
-        if (token >= 0 && static_cast<size_t>(token) < scores.size()) {
-            if (scores[token] > 0) {
-                penalized_scores[token] /= repetition_penalty_;
-            } else {
-                penalized_scores[token] *= repetition_penalty_;
+    // Apply repetition penalty
+    for (auto token : current_tokens) {
+        if (token >= 0 && token < scores.size()) {
+            scores[token] /= repetition_penalty;
+        }
+    }
+    
+    // Apply temperature
+    if (temperature != 1.0f) {
+        for (auto& score : scores) {
+            score /= temperature;
+        }
+    }
+    
+    // Apply softmax
+    float max_score = *std::max_element(scores.begin(), scores.end());
+    float sum = 0.0f;
+    
+    for (auto& score : scores) {
+        score = std::exp(score - max_score);
+        sum += score;
+    }
+    
+    for (auto& score : scores) {
+        score /= sum;
+    }
+    
+    // Apply top-k filtering
+    if (top_k > 0 && top_k < scores.size()) {
+        std::vector<float> sorted_scores = scores;
+        std::nth_element(
+            sorted_scores.begin(),
+            sorted_scores.begin() + top_k,
+            sorted_scores.end(),
+            std::greater<>()
+        );
+        
+        float min_score = sorted_scores[top_k];
+        for (auto& score : scores) {
+            if (score < min_score) {
+                score = 0.0f;
             }
         }
     }
     
-    return penalized_scores;
-}
-
-std::vector<float> BeamSearchDecoder::apply_temperature(
-    std::vector<float>& scores) const {
-    
-    if (temperature_ == 0 || temperature_ == 1.0f) {
-        return scores;
-    }
-    
-    std::vector<float> scaled_scores = scores;
-    for (auto& score : scaled_scores) {
-        score /= temperature_;
-    }
-    
-    return scaled_scores;
-}
-
-std::vector<float> BeamSearchDecoder::apply_top_k_top_p(
-    std::vector<float>& scores) const {
-    
-    std::vector<float> filtered_scores = scores;
-    
-    // 应用 top-k 过滤
-    if (top_k_ > 0 && top_k_ < static_cast<float>(scores.size())) {
-        std::vector<size_t> indices(scores.size());
-        std::iota(indices.begin(), indices.end(), 0);
+    // Apply top-p filtering
+    if (top_p < 1.0f) {
+        std::vector<std::pair<float, size_t>> sorted_scores;
+        sorted_scores.reserve(scores.size());
         
-        std::partial_sort(indices.begin(), 
-                         indices.begin() + static_cast<int>(top_k_),
-                         indices.end(),
-                         [&scores](size_t i1, size_t i2) {
-                             return scores[i1] > scores[i2];
-                         });
-        
-        for (size_t i = static_cast<size_t>(top_k_); i < indices.size(); ++i) {
-            filtered_scores[indices[i]] = -INFINITY;
+        for (size_t i = 0; i < scores.size(); ++i) {
+            if (scores[i] > 0) {
+                sorted_scores.emplace_back(scores[i], i);
+            }
         }
-    }
-    
-    // 应用 top-p (nucleus) 采样
-    if (top_p_ < 1.0f) {
-        std::vector<size_t> indices(filtered_scores.size());
-        std::iota(indices.begin(), indices.end(), 0);
         
-        std::sort(indices.begin(), indices.end(),
-                 [&filtered_scores](size_t i1, size_t i2) {
-                     return filtered_scores[i1] > filtered_scores[i2];
-                 });
+        std::sort(
+            sorted_scores.begin(),
+            sorted_scores.end(),
+            std::greater<>()
+        );
         
         float cumsum = 0.0f;
-        for (size_t i = 0; i < indices.size(); ++i) {
-            cumsum += std::exp(filtered_scores[indices[i]]);
-            if (cumsum > top_p_) {
-                for (size_t j = i + 1; j < indices.size(); ++j) {
-                    filtered_scores[indices[j]] = -INFINITY;
-                }
+        size_t last_idx = sorted_scores.size();
+        
+        for (size_t i = 0; i < sorted_scores.size(); ++i) {
+            cumsum += sorted_scores[i].first;
+            if (cumsum > top_p) {
+                last_idx = i + 1;
                 break;
             }
         }
+        
+        // Zero out scores below the top-p threshold
+        std::vector<float> filtered_scores(scores.size(), 0.0f);
+        for (size_t i = 0; i < last_idx; ++i) {
+            filtered_scores[sorted_scores[i].second] = scores[sorted_scores[i].second];
+        }
+        scores = std::move(filtered_scores);
     }
     
-    return filtered_scores;
-}
-
-float BeamSearchDecoder::compute_sequence_score(
-    const std::vector<int64_t>& sequence) const {
-    
-    float length_penalty = std::pow(sequence.size(), length_penalty_);
-    float sequence_score = 0.0f;
-    
-    // 计算序列的累积分数
-    for (size_t i = 1; i < sequence.size(); ++i) {
-        sequence_score += std::log(sequence[i]);
-    }
-    
-    return sequence_score / length_penalty;
+    return scores;
 }
 
 } // namespace nllb 

@@ -20,37 +20,48 @@ NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config)
     , is_initialized_(false) {
     
     try {
-        // 初始化 ONNX Runtime 选项
+        // Initialize ONNX Runtime options
         Ort::SessionOptions session_options;
         session_options.SetIntraOpNumThreads(config.nllb.params.num_threads);
         session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
         
-        // 加载模型
-        std::string encoder_path = model_dir_ + "/encoder.onnx";
-        std::string decoder_path = model_dir_ + "/decoder.onnx";
-        std::string cache_init_path = model_dir_ + "/cache_init.onnx";
+        // Load models using absolute paths
+        encoder_session_ = std::make_unique<Ort::Session>(ort_env_, 
+            config.nllb.model_files.encoder.c_str(), session_options);
+        decoder_session_ = std::make_unique<Ort::Session>(ort_env_, 
+            config.nllb.model_files.decoder.c_str(), session_options);
+        cache_init_session_ = std::make_unique<Ort::Session>(ort_env_, 
+            config.nllb.model_files.cache_initializer.c_str(), session_options);
+        embed_lm_head_session_ = std::make_unique<Ort::Session>(ort_env_, 
+            config.nllb.model_files.embed_lm_head.c_str(), session_options);
         
-        encoder_session_ = std::make_unique<Ort::Session>(ort_env_, encoder_path.c_str(), session_options);
-        decoder_session_ = std::make_unique<Ort::Session>(ort_env_, decoder_path.c_str(), session_options);
-        cache_init_session_ = std::make_unique<Ort::Session>(ort_env_, cache_init_path.c_str(), session_options);
+        // Initialize tokenizer with absolute path
+        tokenizer_ = std::make_unique<Tokenizer>(config.nllb.model_files.tokenizer_vocab);
         
-        // 初始化分词器
-        std::string vocab_path = model_dir_ + "/sentencepiece.model";
-        tokenizer_ = std::make_unique<Tokenizer>(vocab_path);
-        
-        // 初始化 Beam Search
+        // Initialize beam search
         beam_search_decoder_ = std::make_unique<BeamSearchDecoder>(
             config.nllb.params.beam_size,
             config.nllb.params.length_penalty,
             tokenizer_->eos_id()
         );
         
-        // 初始化缓存容器
+        // Initialize cache container
         cache_container_ = std::make_unique<CacheContainer>();
         
-        // 加载语言代码和支持的语言
+        // Load language codes and supported languages
         initialize_language_codes();
         load_supported_languages();
+        
+        // Copy model parameters
+        model_params_.beam_size = config.nllb.params.beam_size;
+        model_params_.max_length = config.nllb.params.max_length;
+        model_params_.length_penalty = config.nllb.params.length_penalty;
+        model_params_.temperature = config.nllb.params.temperature;
+        model_params_.top_k = config.nllb.params.top_k;
+        model_params_.top_p = config.nllb.params.top_p;
+        model_params_.repetition_penalty = config.nllb.params.repetition_penalty;
+        model_params_.num_threads = config.nllb.params.num_threads;
+        model_params_.support_low_quality_languages = config.nllb.params.support_low_quality_languages;
         
         is_initialized_ = true;
     } catch (const Ort::Exception& e) {
@@ -75,43 +86,46 @@ std::string NLLBTranslator::translate(
     is_translating_ = true;
     
     try {
-        // 1. 分词
+        // 1. Tokenization
         auto tokens = tokenizer_->encode(text, source_lang, target_lang_);
         
-        // 2. 编码器处理
+        // 2. Encoder processing
         auto encoder_output = run_encoder(tokens);
         std::vector<int64_t> encoder_shape = {1, static_cast<int64_t>(tokens.input_ids.size()),
-                                            static_cast<int64_t>(model_config_.hidden_size)};
+                                            static_cast<int64_t>(model_params_.hidden_size)};
         
-        // 3. 初始化缓存
+        // 3. Initialize cache
         cache_container_->initialize(*cache_init_session_, memory_info_,
                                   encoder_output, encoder_shape);
         
-        // 4. Beam Search 解码
+        // 4. Beam Search decoding
         auto hypotheses = beam_search_decoder_->decode(
             *decoder_session_,
+            *embed_lm_head_session_,
             memory_info_,
             encoder_output,
             encoder_shape,
-            *cache_container_
+            *cache_container_,
+            model_params_
         );
         
-        // 5. 选择最佳假设
+        // 5. Select best hypothesis
         auto best_hypothesis = std::max_element(
             hypotheses.begin(),
             hypotheses.end(),
             [](const auto& a, const auto& b) { return a.score < b.score; }
         );
         
-        // 6. 解码结果
-        return tokenizer_->decode(best_hypothesis->tokens);
+        // 6. Decode result
+        auto result = tokenizer_->decode(best_hypothesis->tokens);
+        is_translating_ = false;
+        return result;
         
     } catch (const std::exception& e) {
         set_error(TranslatorError::ERROR_DECODE, e.what());
+        is_translating_ = false;
         return "";
     }
-    
-    is_translating_ = false;
 }
 
 std::vector<float> NLLBTranslator::run_encoder(
@@ -216,7 +230,7 @@ void NLLBTranslator::load_supported_languages() {
     
     // 添加所有标准语言
     for (const auto& [lang_code, nllb_code] : nllb_language_codes_) {
-        if (!model_config_.support_low_quality_languages) {
+        if (!model_params_.support_low_quality_languages) {
             // 如果不支持低质量语言，跳过它们
             if (std::find(low_quality_languages_.begin(), 
                          low_quality_languages_.end(), 
@@ -292,12 +306,12 @@ bool NLLBTranslator::needs_translation(const std::string& source_lang) const {
 
 // 配置管理方法实现
 void NLLBTranslator::set_support_low_quality_languages(bool support) {
-    model_config_.support_low_quality_languages = support;
+    model_params_.support_low_quality_languages = support;
     load_supported_languages();
 }
 
 bool NLLBTranslator::get_support_low_quality_languages() const {
-    return model_config_.support_low_quality_languages;
+    return model_params_.support_low_quality_languages;
 }
 
 void NLLBTranslator::set_beam_size(int size) {
@@ -305,10 +319,10 @@ void NLLBTranslator::set_beam_size(int size) {
         set_error(TranslatorError::ERROR_INVALID_PARAM, "Beam size must be positive");
         return;
     }
-    model_config_.beam_size = size;
+    model_params_.beam_size = size;
     beam_search_decoder_ = std::make_unique<BeamSearchDecoder>(
         size,
-        model_config_.length_penalty,
+        model_params_.length_penalty,
         tokenizer_->eos_id()
     );
 }
@@ -318,13 +332,13 @@ void NLLBTranslator::set_max_length(int length) {
         set_error(TranslatorError::ERROR_INVALID_PARAM, "Max length must be positive");
         return;
     }
-    model_config_.max_length = length;
+    model_params_.max_length = length;
 }
 
 void NLLBTranslator::set_length_penalty(float penalty) {
-    model_config_.length_penalty = penalty;
+    model_params_.length_penalty = penalty;
     beam_search_decoder_ = std::make_unique<BeamSearchDecoder>(
-        model_config_.beam_size,
+        model_params_.beam_size,
         penalty,
         tokenizer_->eos_id()
     );
@@ -335,7 +349,7 @@ void NLLBTranslator::set_temperature(float temp) {
         set_error(TranslatorError::ERROR_INVALID_PARAM, "Temperature must be positive");
         return;
     }
-    model_config_.temperature = temp;
+    model_params_.temperature = temp;
 }
 
 void NLLBTranslator::set_top_k(float k) {
@@ -343,7 +357,7 @@ void NLLBTranslator::set_top_k(float k) {
         set_error(TranslatorError::ERROR_INVALID_PARAM, "Top-k must be non-negative");
         return;
     }
-    model_config_.top_k = k;
+    model_params_.top_k = k;
 }
 
 void NLLBTranslator::set_top_p(float p) {
@@ -351,7 +365,7 @@ void NLLBTranslator::set_top_p(float p) {
         set_error(TranslatorError::ERROR_INVALID_PARAM, "Top-p must be between 0 and 1");
         return;
     }
-    model_config_.top_p = p;
+    model_params_.top_p = p;
 }
 
 void NLLBTranslator::set_repetition_penalty(float penalty) {
@@ -359,7 +373,7 @@ void NLLBTranslator::set_repetition_penalty(float penalty) {
         set_error(TranslatorError::ERROR_INVALID_PARAM, "Repetition penalty must be non-negative");
         return;
     }
-    model_config_.repetition_penalty = penalty;
+    model_params_.repetition_penalty = penalty;
 }
 
 void NLLBTranslator::set_num_threads(int threads) {
@@ -367,7 +381,7 @@ void NLLBTranslator::set_num_threads(int threads) {
         set_error(TranslatorError::ERROR_INVALID_PARAM, "Number of threads must be positive");
         return;
     }
-    model_config_.num_threads = threads;
+    model_params_.num_threads = threads;
 }
 
 std::vector<std::string> NLLBTranslator::translate_batch(
@@ -412,14 +426,14 @@ std::vector<std::string> NLLBTranslator::translate_batch(
                 [this, i, &batch_encoder_output, &results, &thread_caches, &batch_tokens]() {
                     // Extract encoder output for this sequence
                     std::vector<float> encoder_output(
-                        batch_encoder_output.begin() + i * model_config_.hidden_size,
-                        batch_encoder_output.begin() + (i + 1) * model_config_.hidden_size
+                        batch_encoder_output.begin() + i * model_params_.hidden_size,
+                        batch_encoder_output.begin() + (i + 1) * model_params_.hidden_size
                     );
                     
                     std::vector<int64_t> encoder_shape = {
                         1,
                         static_cast<int64_t>(batch_tokens[i].input_ids.size()),
-                        static_cast<int64_t>(model_config_.hidden_size)
+                        static_cast<int64_t>(model_params_.hidden_size)
                     };
                     
                     // Initialize cache for this sequence
@@ -429,10 +443,12 @@ std::vector<std::string> NLLBTranslator::translate_batch(
                     // Beam search decode
                     auto hypotheses = beam_search_decoder_->decode(
                         *decoder_session_,
+                        *embed_lm_head_session_,
                         memory_info_,
                         encoder_output,
                         encoder_shape,
-                        *thread_caches[i]
+                        *thread_caches[i],
+                        model_params_
                     );
                     
                     // Select best hypothesis
@@ -526,6 +542,43 @@ std::vector<float> NLLBTranslator::run_encoder_batch(
             1
         );
         
+        return TensorUtils::getTensorData<float>(outputs[0]);
+        
+    } catch (const Ort::Exception& e) {
+        set_error(TranslatorError::ERROR_ENCODE, e.what());
+        return {};
+    }
+}
+
+std::vector<float> NLLBTranslator::run_embed_lm_head(
+    const std::vector<int64_t>& input_ids) const {
+    
+    try {
+        // 1. Create input tensor
+        auto input_tensor = TensorUtils::createInt64Tensor(
+            memory_info_,
+            input_ids,
+            {1, static_cast<int64_t>(input_ids.size())}
+        );
+        
+        // 2. Prepare inputs
+        std::vector<Ort::Value> ort_inputs;
+        ort_inputs.push_back(std::move(input_tensor));
+        
+        // 3. Run embed_lm_head model
+        const char* input_names[] = {"input_ids"};
+        const char* output_names[] = {"logits"};
+        
+        auto outputs = embed_lm_head_session_->Run(
+            Ort::RunOptions{nullptr},
+            input_names,
+            ort_inputs.data(),
+            ort_inputs.size(),
+            output_names,
+            1
+        );
+        
+        // 4. Get output
         return TensorUtils::getTensorData<float>(outputs[0]);
         
     } catch (const Ort::Exception& e) {

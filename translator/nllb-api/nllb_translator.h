@@ -53,6 +53,7 @@ private:
     std::unique_ptr<Ort::Session> encoder_session_;
     std::unique_ptr<Ort::Session> decoder_session_;
     std::unique_ptr<Ort::Session> cache_init_session_;
+    std::unique_ptr<Ort::Session> embed_lm_head_session_;
 
     // Core components
     std::unique_ptr<Tokenizer> tokenizer_;
@@ -85,10 +86,12 @@ private:
         float repetition_penalty{0.9f};
         int num_threads{4};
         int hidden_size{1024};
+        bool support_low_quality_languages{false};
     } model_params_;
 
     // Helper methods
     std::vector<float> run_encoder(const TokenizerResult& tokens) const;
+    std::vector<float> run_embed_lm_head(const std::vector<int64_t>& input_ids) const;
     void set_error(translator::TranslatorError error, const std::string& message) const;
     void initialize_language_codes();
     void load_supported_languages();
