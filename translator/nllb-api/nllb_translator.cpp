@@ -104,48 +104,33 @@ NLLBTranslator::~NLLBTranslator() = default;
 
 void NLLBTranslator::initialize_language_codes() {
     try {
-        // 加载语言代码映射文件
+        // Load language codes from XML
         tinyxml2::XMLDocument doc;
         std::string xml_path = model_dir_ + "/nllb_supported_languages.xml";
         if (doc.LoadFile(xml_path.c_str()) != tinyxml2::XML_SUCCESS) {
             throw std::runtime_error("Failed to load language codes XML file");
         }
 
-        // 解析XML文件
         auto root = doc.FirstChildElement("languages");
         if (!root) {
-            throw std::runtime_error("Invalid XML format: missing root element");
+            throw std::runtime_error("Invalid XML format: missing languages element");
         }
 
         for (auto lang = root->FirstChildElement("language"); lang; lang = lang->NextSiblingElement("language")) {
             auto code = lang->FirstChildElement("code");
-            auto nllb_code = lang->FirstChildElement("code_NLLB");
+            auto code_nllb = lang->FirstChildElement("code_NLLB");
             
-            if (code && nllb_code) {
-                std::string display_code = code->GetText();
-                std::string nllb_code_str = nllb_code->GetText();
-                
-                nllb_language_codes_[display_code] = nllb_code_str;
-                display_language_codes_[nllb_code_str] = display_code;
-                
-                if (!model_config_.support_low_quality_languages) {
-                    supported_languages_.push_back(display_code);
-                } else {
-                    // 检查是否为低质量语言
-                    auto quality = lang->FirstChildElement("quality");
-                    if (quality && std::string(quality->GetText()) == "low") {
-                        low_quality_languages_.push_back(display_code);
-                    } else {
-                        supported_languages_.push_back(display_code);
-                    }
-                }
+            if (code && code_nllb) {
+                nllb_language_codes_[code->GetText()] = code_nllb->GetText();
+                spdlog::debug("Added language code mapping: {} -> {}", 
+                            code->GetText(), code_nllb->GetText());
             }
         }
-        
-        spdlog::info("Loaded {} supported languages and {} low quality languages", 
-                    supported_languages_.size(), low_quality_languages_.size());
+
+        spdlog::info("Successfully loaded {} language code mappings", nllb_language_codes_.size());
     } catch (const std::exception& e) {
-        throw std::runtime_error("Failed to initialize language codes: " + std::string(e.what()));
+        spdlog::error("Failed to initialize language codes: {}", e.what());
+        throw;
     }
 }
 
@@ -347,15 +332,14 @@ std::string NLLBTranslator::translate(const std::string& text, const std::string
         return "";
     }
 
-    // 检查源语言是否需要翻译
+    // Check if translation is needed
     if (!needs_translation(source_lang)) {
         return text;
     }
 
-    // 获取翻译锁
+    // Get translation lock
     std::lock_guard<std::mutex> lock(translation_mutex_);
     
-    // 使用局部变量来处理原子操作
     bool expected = false;
     if (!is_translating_.compare_exchange_strong(expected, true)) {
         set_error(TranslatorError::ERROR_INVALID_PARAM, "Translation already in progress");
@@ -365,62 +349,73 @@ std::string NLLBTranslator::translate(const std::string& text, const std::string
     try {
         spdlog::info("Starting translation from {} to {}", source_lang, target_lang_);
         
-        // 获取 NLLB 语言代码
+        // Get NLLB language codes
         std::string src_lang_nllb = get_nllb_language_code(source_lang);
         std::string tgt_lang_nllb = get_nllb_language_code(target_lang_);
 
-        // 对输入文本进行分词
+        // Tokenize input text
         auto tokens = tokenizer_->encode(text, src_lang_nllb, tgt_lang_nllb);
         if (tokens.input_ids.empty()) {
             set_error(TranslatorError::ERROR_TOKENIZE, "Failed to tokenize input text");
-            is_translating_.store(false);
+            is_translating_ = false;
             return "";
         }
+
+        // Create input tensors
+        std::vector<Ort::Value> encoder_inputs;
+        encoder_inputs.push_back(create_input_tensor(tokens.input_ids));
+        encoder_inputs.push_back(create_input_tensor(tokens.attention_mask));
+
+        // Run encoder
+        auto encoder_outputs = encoder_session_->Run(
+            Ort::RunOptions{nullptr},
+            encoder_input_names_.data(),
+            encoder_inputs.data(),
+            encoder_inputs.size(),
+            encoder_output_names_.data(),
+            encoder_output_names_.size()
+        );
+
+        // Initialize beam search state
+        BeamSearchState state(beam_config_);
+        state.source_length = tokens.input_ids.size();
+        state.encoder_output = std::move(encoder_outputs[0]);
+        state.encoder_attention_mask = std::move(encoder_inputs[1]);
+
+        // Run beam search
+        auto result = beam_search_decoder_->decode(state);
         
-        // 运行编码器
-        auto encoder_output = run_encoder(tokens);
-        if (encoder_output.empty()) {
-            set_error(TranslatorError::ERROR_ENCODE, "Failed to encode input");
-            is_translating_.store(false);
-            return "";
-        }
+        // Decode output tokens
+        std::string translated_text = tokenizer_->decode(result.output_ids);
         
-        // 运行解码器
-        auto output_ids = run_decoder(encoder_output, tgt_lang_nllb);
-        if (output_ids.empty()) {
-            set_error(TranslatorError::ERROR_DECODE, "Failed to decode output");
-            is_translating_.store(false);
-            return "";
-        }
-        
-        // 将输出转换为文本
-        std::string result = tokenizer_->decode(output_ids);
-        
-        is_translating_.store(false);
-        last_error_ = TranslatorError::OK;
-        error_message_.clear();
-        return result;
+        is_translating_ = false;
+        return translated_text;
+
     } catch (const std::exception& e) {
-        is_translating_.store(false);
-        set_error(TranslatorError::ERROR_MEMORY, "Translation failed: " + std::string(e.what()));
+        spdlog::error("Translation error: {}", e.what());
+        set_error(TranslatorError::ERROR_DECODE, e.what());
+        is_translating_ = false;
         return "";
     }
 }
 
 std::string NLLBTranslator::get_nllb_language_code(const std::string& lang_code) const {
     auto it = nllb_language_codes_.find(lang_code);
-    if (it != nllb_language_codes_.end()) {
-        return it->second;
+    if (it == nllb_language_codes_.end()) {
+        spdlog::warn("No NLLB code found for language code: {}", lang_code);
+        return lang_code;
     }
-    return lang_code; // 如果找不到映射，返回原始代码
+    return it->second;
 }
 
 std::string NLLBTranslator::get_display_language_code(const std::string& nllb_code) const {
-    auto it = display_language_codes_.find(nllb_code);
-    if (it != display_language_codes_.end()) {
-        return it->second;
+    for (const auto& [display_code, nllb] : nllb_language_codes_) {
+        if (nllb == nllb_code) {
+            return display_code;
+        }
     }
-    return nllb_code; // 如果找不到映射，返回原始代码
+    spdlog::warn("No display code found for NLLB code: {}", nllb_code);
+    return nllb_code;
 }
 
 void NLLBTranslator::set_support_low_quality_languages(bool support) {
@@ -578,12 +573,12 @@ std::vector<std::string> NLLBTranslator::translate_batch(
         return std::vector<std::string>();
     }
 
-    // 检查源语言是否需要翻译
+    // Check if translation is needed
     if (!needs_translation(source_lang)) {
         return texts;
     }
 
-    // 获取翻译锁
+    // Get translation lock
     std::lock_guard<std::mutex> lock(translation_mutex_);
     bool expected = false;
     if (!is_translating_.compare_exchange_strong(expected, true)) {
@@ -591,29 +586,20 @@ std::vector<std::string> NLLBTranslator::translate_batch(
     }
 
     try {
-        spdlog::info("Starting batch translation from {} to {}, batch size: {}", 
-                     source_lang, target_lang_, texts.size());
-        
-        std::string src_lang_nllb = get_nllb_language_code(source_lang);
-        std::string tgt_lang_nllb = get_nllb_language_code(target_lang_);
-        
         std::vector<std::string> results;
         results.reserve(texts.size());
 
-        // 批量处理
+        // Process each text in batch
         for (const auto& text : texts) {
-            auto tokens = tokenizer_->encode(text, src_lang_nllb, tgt_lang_nllb);
-            auto encoder_output = run_encoder(tokens);
-            auto output_ids = run_decoder(encoder_output, tgt_lang_nllb);
-            results.push_back(tokenizer_->decode(output_ids));
+            results.push_back(translate(text, source_lang));
         }
 
-        is_translating_.store(false);
+        is_translating_ = false;
         return results;
+
     } catch (const std::exception& e) {
-        is_translating_.store(false);
-        spdlog::error("Batch translation failed: {}", e.what());
-        throw std::runtime_error("Batch translation failed: " + std::string(e.what()));
+        is_translating_ = false;
+        throw;
     }
 }
 

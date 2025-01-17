@@ -37,31 +37,24 @@ struct ModelConfig {
     float eos_penalty;
     int max_batch_size;
     
-    // New parameters matching RTranslator
-    int beam_size;
-    int max_length;
-    float length_penalty;
-    float temperature;
-    float top_k;
-    float top_p;
-    float repetition_penalty;
-
-    ModelConfig(int hidden_size = 1024, int num_heads = 16, int num_layers = 24)
-        : hidden_size(hidden_size), num_heads(num_heads), num_layers(num_layers),
-          vocab_size(256200), max_position_embeddings(1024),
-          encoder_layers(24), decoder_layers(24),
-          support_low_quality_languages(false),
-          eos_penalty(0.9f),
-          max_batch_size(8),
-          beam_size(5),
-          max_length(128),
-          length_penalty(1.0f),
-          temperature(1.0f),
-          top_k(0),
-          top_p(0.9f),
-          repetition_penalty(0.9f) {}
-
-    static ModelConfig load_from_yaml(const std::string& config_path);
+    // Parameters matching RTranslator
+    int beam_size = 5;
+    int max_length = 128;
+    float length_penalty = 1.0f;
+    float temperature = 1.0f;
+    float top_k = 0;  // 0 means disabled
+    float top_p = 0.9f;  // nucleus sampling threshold
+    float repetition_penalty = 0.9f;
+    int num_threads = 4;
+    bool use_cache = true;
+    
+    // Model type
+    enum class ModelType {
+        NLLB,
+        NLLB_CACHE,
+        MADLAD,
+        MADLAD_CACHE
+    } model_type = ModelType::NLLB;
 };
 
 class NLLBTranslator : public translator::ITranslator {
