@@ -1,40 +1,27 @@
 #pragma once
 
-#include <vector>
-#include <memory>
 #include <onnxruntime_cxx_api.h>
+#include <vector>
 
 namespace nllb {
 
 class CacheContainer {
 public:
-    CacheContainer(const Ort::MemoryInfo& memory_info, 
-                  const std::vector<int64_t>& cache_shape);
+    CacheContainer() = default;
     ~CacheContainer() = default;
 
-    // 禁用拷贝
-    CacheContainer(const CacheContainer&) = delete;
-    CacheContainer& operator=(const CacheContainer&) = delete;
+    void initialize(Ort::Session& cache_init_session,
+                   const Ort::MemoryInfo& memory_info,
+                   const std::vector<float>& encoder_hidden_states,
+                   const std::vector<int64_t>& encoder_attention_mask);
 
-    // 允许移动
-    CacheContainer(CacheContainer&&) = default;
-    CacheContainer& operator=(CacheContainer&&) = default;
-
-    // 缓存管理
-    void initialize(Ort::Session* cache_init_session);
-    void update(Ort::Value&& new_key_cache, Ort::Value&& new_value_cache);
+    void addCacheToInputs(std::vector<Ort::Value>& inputs) const;
+    void updateCache(std::vector<Ort::Value>& new_cache);
     void reset();
 
-    // 获取缓存
-    Ort::Value get_key_cache() const;
-    Ort::Value get_value_cache() const;
-
 private:
-    const Ort::MemoryInfo& memory_info_;
-    std::vector<int64_t> cache_shape_;
-    std::unique_ptr<Ort::Value> key_cache_;
-    std::unique_ptr<Ort::Value> value_cache_;
-    bool is_initialized_;
+    std::vector<Ort::Value> past_key_values_;
+    bool is_initialized_{false};
 };
 
 } // namespace nllb 

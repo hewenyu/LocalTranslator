@@ -9,6 +9,8 @@
 #include <tinyxml2.h>
 #include <future>
 #include <thread>
+#include <cctype>
+#include <stdexcept>
 
 namespace nllb {
 
@@ -186,110 +188,88 @@ std::string NLLBTranslator::get_error_message() const {
 }
 
 void NLLBTranslator::initialize_language_codes() {
-    try {
-        tinyxml2::XMLDocument doc;
-        std::string xml_path = model_dir_ + "/nllb_supported_languages.xml";
-        
-        if (doc.LoadFile(xml_path.c_str()) != tinyxml2::XML_SUCCESS) {
-            throw std::runtime_error("Failed to load language codes XML file: " + xml_path);
-        }
+    // Initialize NLLB language codes
+    nllb_language_codes_ = {
+        {"eng_Latn", "eng_Latn"},
+        {"zho_Hans", "zho_Hans"},
+        {"zho_Hant", "zho_Hant"},
+        {"jpn_Jpan", "jpn_Jpan"},
+        {"kor_Hang", "kor_Hang"}
+    };
 
-        auto root = doc.FirstChildElement("languages");
-        if (!root) {
-            throw std::runtime_error("Invalid XML format: missing languages element");
-        }
-
-        for (auto lang = root->FirstChildElement("language"); 
-             lang; 
-             lang = lang->NextSiblingElement("language")) {
-            
-            auto code = lang->FirstChildElement("code");
-            auto code_nllb = lang->FirstChildElement("code_NLLB");
-            
-            if (code && code_nllb) {
-                std::string lang_code = code->GetText();
-                std::string nllb_code = code_nllb->GetText();
-                
-                nllb_language_codes_[lang_code] = nllb_code;
-                display_language_codes_[nllb_code] = lang_code;
-            }
-        }
-        
-        if (nllb_language_codes_.empty()) {
-            throw std::runtime_error("No language codes loaded from XML");
-        }
-        
-    } catch (const std::exception& e) {
-        set_error(TranslatorError::ERROR_INIT, 
-                 "Failed to initialize language codes: " + std::string(e.what()));
-    }
+    // Initialize display language codes
+    display_language_codes_ = {
+        {"eng_Latn", "English"},
+        {"zho_Hans", "简体中文"},
+        {"zho_Hant", "繁體中文"},
+        {"jpn_Jpan", "日本語"},
+        {"kor_Hang", "한국어"}
+    };
 }
 
 void NLLBTranslator::load_supported_languages() {
     supported_languages_.clear();
-    
-    // 添加所有标准语言
-    for (const auto& [lang_code, nllb_code] : nllb_language_codes_) {
-        if (!model_params_.support_low_quality_languages) {
-            // 如果不支持低质量语言，跳过它们
-            if (std::find(low_quality_languages_.begin(), 
-                         low_quality_languages_.end(), 
-                         lang_code) != low_quality_languages_.end()) {
-                continue;
-            }
-        }
-        supported_languages_.push_back(lang_code);
+    low_quality_languages_.clear();
+
+    // Add high quality languages
+    supported_languages_ = {
+        "eng_Latn", "zho_Hans", "zho_Hant", "jpn_Jpan", "kor_Hang"
+    };
+
+    // Add low quality languages if enabled
+    if (model_params_.support_low_quality_languages) {
+        std::vector<std::string> low_quality = {
+            "vie_Latn", "tha_Thai", "rus_Cyrl", "ara_Arab"
+        };
+        supported_languages_.insert(
+            supported_languages_.end(),
+            low_quality.begin(),
+            low_quality.end()
+        );
+        low_quality_languages_ = std::move(low_quality);
     }
-    
-    // 按字母顺序排序
-    std::sort(supported_languages_.begin(), supported_languages_.end());
 }
 
 std::string NLLBTranslator::normalize_language_code(const std::string& lang_code) const {
     std::string normalized = lang_code;
-    
-    // 转换为小写
     std::transform(normalized.begin(), normalized.end(), normalized.begin(), ::tolower);
-    
-    // 移除区域标识符
-    size_t separator_pos = normalized.find_first_of("-_");
-    if (separator_pos != std::string::npos) {
-        normalized = normalized.substr(0, separator_pos);
-    }
-    
+    normalized.erase(
+        std::remove_if(normalized.begin(), normalized.end(), ::isspace),
+        normalized.end()
+    );
     return normalized;
 }
 
 std::string NLLBTranslator::get_nllb_language_code(const std::string& lang_code) const {
     auto normalized = normalize_language_code(lang_code);
     auto it = nllb_language_codes_.find(normalized);
-    
-    if (it == nllb_language_codes_.end()) {
-        set_error(TranslatorError::ERROR_INVALID_PARAM, 
-                 "Unsupported language code: " + lang_code);
-        return "";
-    }
-    
-    return it->second;
+    return it != nllb_language_codes_.end() ? it->second : normalized;
 }
 
 std::string NLLBTranslator::get_display_language_code(const std::string& nllb_code) const {
     auto it = display_language_codes_.find(nllb_code);
-    
-    if (it == display_language_codes_.end()) {
-        set_error(TranslatorError::ERROR_INVALID_PARAM, 
-                 "Unknown NLLB code: " + nllb_code);
-        return nllb_code;
-    }
-    
-    return it->second;
+    return it != display_language_codes_.end() ? it->second : nllb_code;
 }
 
 bool NLLBTranslator::is_language_supported(const std::string& lang_code) const {
     auto normalized = normalize_language_code(lang_code);
-    return std::find(supported_languages_.begin(), 
-                    supported_languages_.end(), 
-                    normalized) != supported_languages_.end();
+    return std::find(supported_languages_.begin(), supported_languages_.end(), normalized) 
+           != supported_languages_.end();
+}
+
+bool NLLBTranslator::needs_translation(const std::string& source_lang) const {
+    auto normalized_source = normalize_language_code(source_lang);
+    auto normalized_target = normalize_language_code(target_lang_);
+    return normalized_source != normalized_target;
+}
+
+void NLLBTranslator::set_support_low_quality_languages(bool support) {
+    model_params_.support_low_quality_languages = support;
+    load_supported_languages();
+}
+
+bool NLLBTranslator::get_support_low_quality_languages() const {
+    return model_params_.support_low_quality_languages;
 }
 
 std::vector<std::string> NLLBTranslator::get_supported_languages() const {
@@ -298,20 +278,6 @@ std::vector<std::string> NLLBTranslator::get_supported_languages() const {
 
 std::string NLLBTranslator::get_target_language() const {
     return target_lang_;
-}
-
-bool NLLBTranslator::needs_translation(const std::string& source_lang) const {
-    return normalize_language_code(source_lang) != normalize_language_code(target_lang_);
-}
-
-// 配置管理方法实现
-void NLLBTranslator::set_support_low_quality_languages(bool support) {
-    model_params_.support_low_quality_languages = support;
-    load_supported_languages();
-}
-
-bool NLLBTranslator::get_support_low_quality_languages() const {
-    return model_params_.support_low_quality_languages;
 }
 
 void NLLBTranslator::set_beam_size(int size) {
