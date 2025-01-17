@@ -1,637 +1,1178 @@
-# RTranslator项目分析报告
-
-## 项目概述
-RTranslator是一个Android平台的翻译应用，支持实时语音翻译功能。该项目使用Java开发，采用现代Android开发架构和组件。
-
-## 技术栈和依赖库
-
-### 核心依赖
-1. **ONNX Runtime** (版本: 1.19.0)
-   - 用于机器学习模型的推理
-   - 包含扩展包：onnxruntime-extensions-android (0.12.4)
-
-2. **ML Kit**
-   - 使用Google的ML Kit进行语言识别
-   - 依赖：com.google.mlkit:language-id:17.0.5
-
-3. **Room Database**
-   - 用于本地数据存储
-   - 版本：2.1.0
-   - 包含RxJava和Guava支持
-
-### Android框架组件
-- Material Design组件 (1.9.0)
-- AndroidX库
-  - CardView
-  - RecyclerView
-  - ConstraintLayout
-  - Preferences
-  - Work Runtime
-  - Lifecycle Extensions
-
-## 项目结构
-
-### 主要模块
-1. **voice_translation/**
-   - 语音翻译相关的核心功能实现
-
-2. **tools/**
-   - 工具类和辅助功能
-
-3. **settings/**
-   - 应用设置相关功能
-
-4. **database/**
-   - 数据库操作和数据持久化
-
-5. **bluetooth/**
-   - 蓝牙通信相关功能
-
-6. **access/**
-   - 访问控制和权限管理
-
-### 核心文件
-- `Global.java`: 全局配置和工具类
-- `LoadingActivity.java`: 应用加载界面
-- `GeneralActivity.java`: 基础Activity类
-- `GeneralService.java`: 基础Service类
-
-## 功能特点
-1. 实时语音翻译
-2. 蓝牙设备通信
-3. 本地数据存储
-4. 多语言支持
-5. 语言识别
-
-## 技术实现细节
-
-### 机器学习实现
-- 使用ONNX Runtime进行模型推理
-- 集成ML Kit进行语言识别
-
-### 数据存储
-- 使用Room数据库进行本地数据持久化
-- 支持RxJava异步操作
-
-### 系统要求
-- 最低支持Android SDK 24
-- 目标SDK 32
-- 编译SDK 33
-- 支持arm64-v8a架构
-
-## 构建配置
-- 使用Gradle构建系统
-- 支持CMake原生开发
-- 包含混淆和资源压缩配置
-
-## 安全性考虑
-- 集成JWS解析器(nimbus-jose-jwt)用于安全验证
-- 实现访问控制和权限管理机制 
-
-## 翻译功能详细实现
-
-### 核心组件
-1. **VoiceTranslationService**
-   - 处理语音翻译的核心服务
-   - 管理翻译生命周期
-   - 处理后台翻译任务
-
-2. **VoiceTranslationActivity**
-   - 主要的用户界面
-   - 处理用户输入和交互
-   - 显示翻译结果
-
-3. **VoiceTranslationFragment**
-   - 提供模块化的翻译界面
-   - 管理翻译相关的UI组件
-
-### 翻译模式
-1. **对话模式** (_conversation_mode/)
-   - 支持多人实时对话翻译
-   - 通过蓝牙连接实现设备间通信
-
-2. **对讲机模式** (_walkie_talkie_mode/)
-   - 一对一实时语音翻译
-   - 按住说话功能
-
-3. **文本翻译模式** (_text_translation/)
-   - 支持纯文本输入翻译
-   - 支持复制粘贴功能
-
-### 神经网络实现 (neural_networks/)
-
-#### 核心API类
-1. **NeuralNetworkApi**
-   - 神经网络操作的基础接口
-   - 定义了模型加载和推理的基本方法
-
-2. **NeuralNetworkApiListener**
-   - 处理神经网络操作的回调接口
-   - 提供结果和错误处理机制
-
-3. **NeuralNetworkApiResult**
-   - 封装神经网络处理结果
-   - 包含翻译文本和元数据
-
-4. **NeuralNetworkApiText**
-   - 处理文本相关的神经网络操作
-   - 文本预处理和后处理
-
-#### 功能模块
-1. **语音处理** (voice/)
-   - 语音识别
-   - 语音合成
-   - 音频信号处理
-
-2. **翻译处理** (translation/)
-   - 文本翻译
-   - 语言检测
-   - 模型推理
-
-### 技术特点
-1. **ONNX Runtime集成**
-   - 使用ONNX Runtime进行高效的模型推理
-   - 支持多种神经网络模型格式
-   - 优化的本地执行性能
-
-2. **实时处理**
-   - 流式语音识别
-   - 低延迟翻译处理
-   - 实时音频传输
-
-3. **多模态支持**
-   - 语音到语音转换
-   - 语音到文本转换
-   - 文本到语音转换
-
-4. **错误处理和恢复**
-   - 网络错误恢复机制
-   - 模型加载失败处理
-   - 音频处理异常处理
-
-### 性能优化
-1. **模型优化**
-   - 模型量化
-   - 计算优化
-   - 内存使用优化
-
-2. **并发处理**
-   - 异步模型推理
-   - 并行音频处理
-   - 后台服务优化
-
-3. **资源管理**
-   - 智能内存管理
-   - 电池使用优化
-   - 缓存机制 
-
-## 翻译器核心实现
-
-### 翻译模型
-1. **支持的模型类型**
-   - NLLB (No Language Left Behind)
-   - MADLAD
-   - 支持模型缓存机制
-
-2. **ONNX Runtime集成**
-   - 使用多个ONNX会话
-     * encoderSession: 编码器会话
-     * decoderSession: 解码器会话
-     * cacheInitSession: 缓存初始化会话
-     * embedAndLmHeadSession: 嵌入和语言模型头部会话
-     * embedSession: 嵌入会话
-
-### 文本处理流程
-1. **分词处理**
-   - 使用SentencePiece分词器
-   - TokenizerResult封装分词结果
-   - 支持批处理操作
-
-2. **语言检测**
-   - 使用Google ML Kit进行语言识别
-   - 支持单语言和多语言检测
-   - 提供强制检测选项
-
-3. **翻译流程**
-   - 文本预处理和规范化
-   - 编码器-解码器架构
-   - Beam Search解码策略
-   - 支持增量翻译
-
-### 性能优化
-1. **并发处理**
-   - 使用Handler处理主线程通信
-   - 异步翻译队列（ArrayDeque）
-   - 线程同步机制
-
-2. **缓存优化**
-   - 模型缓存
-   - 最近输入/输出文本缓存
-   - 结果ID跟踪机制
-
-3. **内存管理**
-   - ONNX会话生命周期管理
-   - 张量内存优化
-   - 批处理大小控制
-
-### 错误处理
-1. **异常处理机制**
-   - 模型加载错误处理
-   - 语言检测失败处理
-   - 翻译失败恢复
-
-2. **回调系统**
-   - TranslatorListener基础接口
-   - TranslateListener用于文本翻译
-   - TranslateMessageListener用于消息翻译
-   - DetectLanguageListener用于语言检测
-
-### 多语言支持
-1. **语言编码**
-   - NLLB语言代码映射
-   - 自定义语言环境（CustomLocale）
-   - 支持语言动态加载
-
-2. **文本校正**
-   - 基于语言的句子终止符
-   - 标点符号规范化
-   - Unicode文本处理
-
-### 集成特性
-1. **消息系统集成**
-   - 支持ConversationMessage对象
-   - GUI消息处理
-   - 蓝牙消息支持
-
-2. **配置管理**
-   - SharedPreferences配置存储
-   - XML配置文件解析
-   - 动态参数调整
-
-3. **扩展性设计**
-   - 模块化的API设计
-   - 可插拔的模型架构
-   - 灵活的回调机制 
-
-## 语音处理实现
-
-### 录音系统 (Recorder)
-1. **音频捕获**
-   - 音频录制配置
-   - 音频格式控制
-   - 实时音频流处理
-
-2. **音频处理**
-   - 音频数据缓冲
-   - 音量控制
-   - 噪音抑制
-
-3. **性能优化**
-   - 音频数据压缩
-   - 内存使用优化
-   - 实时处理优化
-
-### 语音识别 (Recognizer)
-1. **识别功能**
-   - 实时语音识别
-   - 多语言支持
-   - 结果置信度评估
-
-2. **回调系统**
-   - RecognizerListener基础接口
-   - RecognizerMultiListener多语言支持
-   - 错误处理回调
-
-3. **集成特性**
-   - 与翻译系统集成
-   - 实时反馈机制
-   - 状态管理
-
-### 语音处理流程
-1. **预处理阶段**
-   - 音频信号预处理
-   - 降噪处理
-   - 音频格式转换
-
-2. **识别阶段**
-   - 特征提取
-   - 模型推理
-   - 结果后处理
-
-3. **后处理阶段**
-   - 文本规范化
-   - 标点符号处理
-   - 结果优化
-
-### 性能考虑
-1. **实时性能**
-   - 低延迟处理
-   - 流式处理优化
-   - 资源使用优化
-
-2. **准确性优化**
-   - 噪声处理
-   - 识别质量控制
-   - 结果验证机制
-
-3. **资源管理**
-   - 内存使用优化
-   - CPU使用优化
-   - 电池消耗优化
-
-### 错误处理
-1. **录音错误**
-   - 设备权限处理
-   - 硬件错误处理
-   - 资源占用处理
-
-2. **识别错误**
-   - 网络错误恢复
-   - 模型错误处理
-   - 超时处理
-
-3. **系统错误**
-   - 内存不足处理
-   - 系统中断处理
-   - 异常恢复机制
-
-### 集成功能
-1. **用户界面集成**
-   - 实时反馈显示
-   - 状态指示器
-   - 错误提示
-
-2. **系统集成**
-   - 音频系统集成
-   - 电源管理集成
-   - 系统服务集成
-
-3. **多语言支持**
-   - 语言切换机制
-   - 方言支持
-   - 口音适应 
-
-## 对话模式实现
-
-### 配对系统
-1. **配对界面 (PairingFragment)**
-   - 设备发现和配对
-   - 蓝牙连接管理
-   - 用户界面交互
-
-2. **工具栏功能 (PairingToolbarFragment)**
-   - 配对状态显示
-   - 快速操作按钮
-   - 设置访问
-
-### 通信系统
-1. **设备通信**
-   - 蓝牙数据传输
-   - 消息队列管理
-   - 连接状态监控
-
-2. **数据同步**
-   - 实时消息同步
-   - 状态同步
-   - 错误恢复
-
-3. **安全性**
-   - 数据加密
-   - 连接验证
-   - 隐私保护
-
-### 对话管理
-1. **会话控制**
-   - 会话创建和管理
-   - 参与者管理
-   - 状态追踪
-
-2. **消息处理**
-   - 消息排序
-   - 实时翻译
-   - 历史记录
-
-3. **用户交互**
-   - 实时反馈
-   - 语言切换
-   - 设置调整
-
-### 性能优化
-1. **通信优化**
-   - 低延迟传输
-   - 带宽优化
-   - 电池效率
-
-2. **内存管理**
-   - 会话缓存
-   - 消息缓冲
-   - 资源释放
-
-3. **并发处理**
-   - 多线程通信
-   - 异步消息处理
-   - 状态同步
-
-### 错误处理
-1. **连接错误**
-   - 断线重连
-   - 信号丢失恢复
-   - 配对失败处理
-
-2. **通信错误**
-   - 消息重传
-   - 数据完整性检查
-   - 超时处理
-
-3. **系统错误**
-   - 资源不足处理
-   - 权限错误处理
-   - 系统异常恢复
-
-### 用户体验
-1. **界面设计**
-   - 直观的配对流程
-   - 清晰的状态显示
-   - 简单的操作方式
-
-2. **反馈机制**
-   - 连接状态提示
-   - 错误提示
-   - 操作确认
-
-3. **可访问性**
-   - 多语言界面
-   - 辅助功能支持
-   - 自定义选项
-
-### 扩展性
-1. **协议扩展**
-   - 自定义消息类型
-   - 新功能集成
-   - 协议版本管理
-
-2. **设备支持**
-   - 多设备类型支持
-   - 不同系统兼容
-   - 硬件适配
-
-3. **功能扩展**
-   - 插件系统
-   - API接口
-   - 自定义设置 
-
-## 核心函数实现细节
-
-### 翻译器 (Translator类)
-
-#### 构造函数
-```java
-public Translator(@NonNull Global global, int mode, InitListener initListener)
+# RTranslator 技术实现文档
+
+## 0. 系统流程图
+
+### 0.1 整体架构流程
+```mermaid
+graph TD
+    A[用户输入] --> B{输入类型}
+    B -->|语音输入| C[语音识别模块]
+    B -->|文本输入| D[文本处理模块]
+    
+    C --> E[Whisper模型]
+    E --> F[文本输出]
+    
+    D --> F
+    
+    F --> G[文本预处理]
+    G --> H[NLLB翻译模块]
+    H --> I[文本后处理]
+    
+    I --> J{输出类型}
+    J -->|语音输出| K[TTS模块]
+    J -->|文本输出| L[显示结果]
+    
+    K --> L
 ```
-参数:
-- global: 全局上下文对象
-- mode: 翻译模式 (NLLB=0, NLLB_CACHE=6, MADLAD=3, MADLAD_CACHE=5)
-- initListener: 初始化回调监听器
 
-功能:
-- 初始化ONNX运行时环境
-- 加载模型文件
-- 设置会话选项
-- 初始化分词器
-
-#### 翻译函数
-```java
-public void translate(String textToTranslate, CustomLocale languageInput, 
-                     CustomLocale languageOutput, int beamSize, boolean saveResults)
+### 0.2 语音识别流程
+```mermaid
+graph TD
+    A[音频输入] --> B[音频预处理]
+    B --> C[Whisper Encoder]
+    C --> D[特征提取]
+    D --> E[Whisper Decoder]
+    E --> F[文本生成]
+    F --> G[后处理]
+    G --> H[识别结果]
 ```
-参数:
-- textToTranslate: 待翻译文本
-- languageInput: 输入语言
-- languageOutput: 输出语言
-- beamSize: beam search大小
-- saveResults: 是否保存结果
 
-```java
-public void translateMessage(ConversationMessage conversationMessageToTranslate,
-                           CustomLocale languageOutput, int beamSize,
-                           TranslateMessageListener responseListener)
+### 0.3 翻译流程
+```mermaid
+graph TD
+    A[输入文本] --> B1[文本预处理]
+    B1 --> B2[长文本分段]
+    B2 --> B3[SentencePiece分词]
+    B3 --> B4[添加语言标识符]
+    B4 --> B5[转换为input_ids]
+    
+    subgraph Encoder处理
+        C1[NLLB Encoder] --> C2[创建attention_mask]
+        C2 --> C3[执行encoder推理]
+        C3 --> C4[生成encoder_hidden_states]
+    end
+    
+    B5 --> C1
+    
+    subgraph KV Cache处理
+        D1[初始化KV Cache] --> D2[缓存key/value states]
+        D2 --> D3[更新past_key_values]
+    end
+    
+    C4 --> D1
+    
+    subgraph Decoder处理
+        E1[NLLB Decoder] --> E2[Beam Search解码]
+        E2 --> E3[计算logits]
+        E3 --> E4[选择最优token]
+        E4 --> E5{是否结束?}
+        E5 -->|否| E1
+        E5 -->|是| E6[完成解码]
+    end
+    
+    D3 --> E1
+    
+    E6 --> F1[SentencePiece解码]
+    F1 --> F2[移除特殊标记]
+    F2 --> F3[合并子文本]
+    F3 --> G[翻译结果]
+    
+    subgraph 性能优化
+        H1[Tensor优化] --> H2[内存复用]
+        H2 --> H3[批处理优化]
+    end
+    
+    style Encoder处理 fill:#f9f,stroke:#333,stroke-width:2px
+    style Decoder处理 fill:#bbf,stroke:#333,stroke-width:2px
+    style KV Cache处理 fill:#bfb,stroke:#333,stroke-width:2px
+    style 性能优化 fill:#fbf,stroke:#333,stroke-width:2px
 ```
-参数:
-- conversationMessageToTranslate: 待翻译的对话消息
-- languageOutput: 目标语言
-- beamSize: beam search大小
-- responseListener: 翻译结果回调监听器
 
-### 语音识别器 (Recognizer类)
-
-#### 构造函数
-```java
-public Recognizer(Global global, boolean returnResultOnlyAtTheEnd,
-                 NeuralNetworkApi.InitListener initListener)
+### 0.4 TTS流程
+```mermaid
+graph TD
+    A[文本输入] --> B[语言检测]
+    B --> C[TTS引擎选择]
+    C --> D{质量模式}
+    D -->|高质量| E[标准TTS]
+    D -->|低质量| F[轻量TTS]
+    E --> G[语音合成]
+    F --> G
+    G --> H[音频输出]
 ```
-参数:
-- global: 全局上下文对象
-- returnResultOnlyAtTheEnd: 是否仅在结束时返回结果
-- initListener: 初始化回调监听器
 
-功能:
-- 初始化ONNX运行时环境
-- 加载Whisper模型相关文件
-- 配置各种会话选项
-
-#### 识别函数
-```java
-public void recognize(float[] data, int beamSize, String languageCode)
+### 0.5 内存优化流程
+```mermaid
+graph TD
+    A[模型加载] --> B[模型分离]
+    B --> C[量化处理]
+    C --> D[KV Cache]
+    
+    E[运行时] --> F[DirectBuffer]
+    F --> G[内存复用]
+    G --> H[资源释放]
+    
+    I[批处理] --> J[Tensor优化]
+    J --> K[JNI优化]
+    K --> L[性能提升]
 ```
-参数:
-- data: 音频数据(float数组)
-- beamSize: beam search大小
-- languageCode: 目标语言代码
+
+## 1. 核心组件
+
+### 1.1 翻译器实现 (Translator.java)
 
 ```java
-public void recognize(float[] data, int beamSize, 
-                     String languageCode1, String languageCode2)
-```
-参数:
-- data: 音频数据
-- beamSize: beam search大小
-- languageCode1: 第一语言代码
-- languageCode2: 第二语言代码
+public class Translator extends NeuralNetworkApi {
+    // 翻译模型类型
+    public static final int NLLB = 0;
+    public static final int NLLB_CACHE = 6;
+    public static final int MADLAD = 3;
+    public static final int MADLAD_CACHE = 5;
 
-### 常量和配置
+    // 核心组件
+    private Tokenizer tokenizer;
+    private OrtEnvironment onnxEnv;
+    private OrtSession encoderSession;
+    private OrtSession decoderSession;
+    private OrtSession cacheInitSession;
+    private OrtSession embedAndLmHeadSession;
+    private OrtSession embedSession;
+    private Map<String, String> nllbLanguagesCodes;
 
-#### 翻译器常量
-- NLLB = 0: NLLB标准模式
-- NLLB_CACHE = 6: NLLB缓存模式
-- MADLAD = 3: MADLAD标准模式
-- MADLAD_CACHE = 5: MADLAD缓存模式
-- EOS_PENALTY = 0.9: 结束符惩罚因子
-- EMPTY_BATCH_SIZE = 1: 空批处理大小
+    // 初始化翻译器
+    public Translator(@NonNull Global global, int mode, InitListener initListener) {
+        // 加载模型文件
+        String encoderPath = global.getFilesDir().getPath() + "/NLLB_encoder.onnx";
+        String decoderPath = global.getFilesDir().getPath() + "/NLLB_decoder.onnx";
+        String vocabPath = global.getFilesDir().getPath() + "/sentencepiece_bpe.model";
+        
+        // 初始化ONNX运行时
+        onnxEnv = OrtEnvironment.getEnvironment();
+        
+        // 加载分词器
+        tokenizer = new Tokenizer(vocabPath, mode == MADLAD_CACHE ? Tokenizer.MADLAD : Tokenizer.NLLB);
+    }
 
-#### 语音识别器常量
-- MAX_TOKENS_PER_SECOND = 30: 每秒最大token数
-- MAX_TOKENS = 445: 最大token数限制
-- START_TOKEN_ID = 50258: 起始token ID
-- TRANSCRIBE_TOKEN_ID = 50359: 转录token ID
-- NO_TIMESTAMPS_TOKEN_ID = 50363: 无时间戳token ID
-
-### 回调接口
-
-#### 翻译器回调
-```java
-public interface TranslateListener extends TranslatorListener {
-    void onTranslatedText(String text, long resultID, boolean isFinal, 
-                         CustomLocale languageOfText);
+    // 执行翻译
+    private OnnxTensor executeEncoder(int[] inputIds, int[] attentionMask) {
+        try {
+            Map<String, OnnxTensor> encoderInput = new HashMap<>();
+            encoderInput.put("input_ids", TensorUtils.createInt64Tensor(onnxEnv, inputIds, new long[]{1, inputIds.length}));
+            encoderInput.put("attention_mask", TensorUtils.createInt64Tensor(onnxEnv, attentionMask, new long[]{1, attentionMask.length}));
+            
+            OrtSession.Result result = encoderSession.run(encoderInput);
+            return (OnnxTensor) result.get("last_hidden_state").get();
+        } catch (OrtException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
 }
 ```
 
-#### 语音识别器回调
+### 1.2 分词器实现 (Tokenizer.java)
+
 ```java
-public interface RecognizerListener {
-    void onRecognizedText(String text, String languageCode, 
-                         double confidenceScore, boolean isFinal);
-}
+public class Tokenizer {
+    private SentencePieceProcessorJava spProcessor;
+    private final int mode;
 
-public interface RecognizerMultiListener {
-    void onRecognizedText(String text1, String languageCode1, double confidenceScore1,
-                         String text2, String languageCode2, double confidenceScore2);
-}
-```
-
-### 数据结构
-
-#### 翻译器数据容器
-```java
-private static class DataContainer {
-    ConversationMessage conversationMessageToTranslate;
-    CustomLocale languageOutput;
-    int beamSize;
-    TranslateMessageListener responseListener;
+    // 分词处理
+    public TokenizerResult tokenize(String srcLang, String tgtLang, String text) {
+        // 添加语言标识
+        String processedText = getNllbLanguageCode(srcLang) + text + getNllbLanguageCode(tgtLang);
+        
+        // 使用SentencePiece进行分词
+        int[] inputIds = spProcessor.encode(processedText);
+        int[] attentionMask = new int[inputIds.length];
+        Arrays.fill(attentionMask, 1);
+        
+        return new TokenizerResult(inputIds, attentionMask);
+    }
 }
 ```
 
-#### 语音识别器数据容器
+### 1.3 SentencePiece处理器 (SentencePieceProcessorJava.java)
+
 ```java
-private static class DataContainer {
-    float[] data;
-    String languageCode;
-    String languageCode2;
-    int beamSize;
+public class SentencePieceProcessorJava {
+    // 特殊标记
+    private final String[] specialTokens = {"<s>", "<pad>", "</s>", "<unk>"};
+    private final long spProcessorPointer;
+
+    static {
+        System.loadLibrary("sentencepiece");
+    }
+
+    // 编码文本
+    public int[] encode(String text) {
+        // 调用native方法进行分词
+        return nativeEncode(spProcessorPointer, text);
+    }
+
+    // 解码token
+    public String decode(int[] ids) {
+        // 调用native方法进行解码
+        return nativeDecode(spProcessorPointer, ids);
+    }
 }
 ```
 
-### 性能优化参数
+## 2. 翻译流程详解
 
-#### ONNX会话选项
+### 2.1 文本预处理阶段
+
+#### 2.1.1 长文本分段
 ```java
-SessionOptions options = new SessionOptions();
-options.setMemoryPatternOptimization(false);
-options.setCPUArenaAllocator(false);
-options.setOptimizationLevel(OptLevel.NO_OPT);
+// 长文本分段实现
+private List<String> splitLongText(String text, int maxLength) {
+    List<String> segments = new ArrayList<>();
+    // 按句子分割，保持上下文完整性
+    String[] sentences = text.split("(?<=[.!?。！？]\\s)");
+    StringBuilder currentSegment = new StringBuilder();
+    
+    for (String sentence : sentences) {
+        if (currentSegment.length() + sentence.length() > maxLength) {
+            segments.add(currentSegment.toString());
+            currentSegment = new StringBuilder();
+        }
+        currentSegment.append(sentence);
+    }
+    if (currentSegment.length() > 0) {
+        segments.add(currentSegment.toString());
+    }
+    return segments;
+}
 ```
 
-#### 内存管理
-- 根据设备总RAM调整优化策略
-- 低内存设备(<7GB)禁用部分优化
-- 使用Handler处理主线程通信
-- 实现队列管理异步任务 
+- 目的：将长文本分割成适合模型处理的小段
+- 实现要点：
+  - 按句子边界分割，保持语义完整性
+  - 考虑多语言标点符号
+  - 控制每段长度不超过模型最大输入长度
+  - 保持上下文连贯性
+
+#### 2.1.2 SentencePiece分词
+```java
+public class Tokenizer {
+    private SentencePieceProcessor processor;
+    private static final int NORMAL_MODE = 0;
+    private static final int MADLAD_MODE = 1;
+    
+    // 分词处理
+    public long[] encode(String text, String lang) {
+        String processed = preprocess(text, lang);
+        return processor.encodeAsIds(processed);
+    }
+}
+```
+
+- 功能：将文本转换为子词单元
+- 技术细节：
+  - 使用SentencePiece算法进行分词
+  - 支持多语言分词模型
+  - 处理未登录词（OOV）
+  - 保持特殊标记
+
+#### 2.1.3 语言标识符添加
+```java
+private String addLanguageTag(String text, String srcLang, String tgtLang) {
+    return String.format("___%s___ %s ___%s___", srcLang, text, tgtLang);
+}
+```
+
+- 实现：
+  - 添加源语言和目标语言标识
+  - 标准化语言代码
+  - 处理特殊语言对
+
+### 2.2 Encoder处理
+
+#### 2.2.1 Attention Mask生成
+```java
+private OnnxTensor createAttentionMask(long[] inputIds) {
+    long[] attentionMask = new long[inputIds.length];
+    Arrays.fill(attentionMask, 1L);
+    long[] shape = {1, inputIds.length};
+    return OnnxTensor.createTensor(onnxEnv, attentionMask, shape);
+}
+```
+
+- 技术要点：
+  - 生成注意力掩码矩阵
+  - 处理填充标记
+  - 优化内存分配
+
+#### 2.2.2 Encoder推理
+```java
+private OnnxValue runEncoder(OnnxTensor inputIds, OnnxTensor attentionMask) {
+    Map<String, OnnxTensor> inputs = new HashMap<>();
+    inputs.put("input_ids", inputIds);
+    inputs.put("attention_mask", attentionMask);
+    return encoderSession.run(inputs).get(0);
+}
+```
+
+- 实现细节：
+  - 输入张量准备
+  - ONNX会话管理
+  - 内存优化策略
+
+### 2.3 KV Cache处理
+
+#### 2.3.1 Cache初始化
+```java
+private CacheContainer initializeCache(OnnxValue encoderOutput) {
+    Map<String, OnnxTensor> cacheInputs = new HashMap<>();
+    cacheInputs.put("encoder_hidden_states", (OnnxTensor)encoderOutput);
+    OrtSession.Result cacheResult = cacheInitSession.run(cacheInputs);
+    return new CacheContainer(cacheResult);
+}
+```
+
+- 关键功能：
+  - 缓存key和value状态
+  - 管理缓存生命周期
+  - 优化推理性能
+
+### 2.4 Decoder处理
+
+#### 2.4.1 Beam Search实现
+```java
+private class BeamSearchDecoder {
+    private static final int BEAM_SIZE = 4;
+    private static final float LENGTH_PENALTY = 1.0f;
+    private static final float EOS_PENALTY = 1.0f;
+    
+    public List<Long> decode(OnnxValue encoderOutput, CacheContainer cache) {
+        BeamHypotheses hypotheses = new BeamHypotheses(BEAM_SIZE);
+        while (!hypotheses.isDone()) {
+            // 计算当前步骤的logits
+            float[] scores = computeNextTokenScores(encoderOutput, cache);
+            // 更新beam hypotheses
+            hypotheses.advance(scores);
+        }
+        return hypotheses.getBestHypothesis();
+    }
+}
+```
+
+- 技术细节：
+  - Beam Search算法实现
+  - 评分机制
+  - 长度惩罚
+  - 终止条件判断
+
+### 2.5 后处理阶段
+
+#### 2.5.1 SentencePiece解码
+```java
+public String decode(long[] tokens) {
+    String raw = processor.decode(tokens);
+    return postprocess(raw);
+}
+```
+
+- 实现要点：
+  - 子词合并
+  - 特殊标记处理
+  - 格式规范化
+
+#### 2.5.2 文本合并
+```java
+private String mergeTranslations(List<String> translations) {
+    return String.join(" ", translations)
+           .replaceAll("\\s+([.,!?])", "$1")
+           .trim();
+}
+```
+
+- 功能：
+  - 合并分段翻译
+  - 修复标点符号
+  - 格式化输出
+
+### 2.6 性能优化
+
+#### 2.6.1 Tensor优化
+```java
+public class TensorOptimizer {
+    // 使用DirectBuffer优化内存
+    private ByteBuffer createDirectBuffer(long size) {
+        return ByteBuffer.allocateDirect((int)size)
+               .order(ByteOrder.LITTLE_ENDIAN);
+    }
+    
+    // Tensor复用池
+    private class TensorPool {
+        private Map<Long, Queue<OnnxTensor>> pool;
+        
+        public OnnxTensor acquire(long[] shape) {
+            // 从池中获取或创建新的Tensor
+        }
+        
+        public void release(OnnxTensor tensor) {
+            // 返回Tensor到池中
+        }
+    }
+}
+```
+
+- 优化策略：
+  - DirectBuffer使用
+  - Tensor池化
+  - 内存复用
+  - 批处理优化
+
+#### 2.6.2 内存管理优化
+```java
+public class MemoryManager {
+    // 内存池配置
+    private static final int INITIAL_POOL_SIZE = 8;
+    private static final int MAX_POOL_SIZE = 32;
+    
+    // 内存复用策略
+    private class MemoryPool {
+        private final Map<Integer, Queue<ByteBuffer>> bufferPool;
+        
+        public ByteBuffer acquire(int size) {
+            Queue<ByteBuffer> queue = bufferPool.computeIfAbsent(size, k -> new LinkedList<>());
+            ByteBuffer buffer = queue.poll();
+            if (buffer == null) {
+                buffer = ByteBuffer.allocateDirect(size);
+            }
+            return buffer;
+        }
+        
+        public void release(ByteBuffer buffer) {
+            int size = buffer.capacity();
+            Queue<ByteBuffer> queue = bufferPool.get(size);
+            if (queue.size() < MAX_POOL_SIZE) {
+                buffer.clear();
+                queue.offer(buffer);
+            }
+        }
+    }
+}
+```
+
+- 优化策略：
+  - 内存池化管理
+  - 动态调整池大小
+  - 自动内存回收
+  - 内存碎片处理
+
+#### 2.6.3 批处理优化
+```java
+public class BatchProcessor {
+    private static final int OPTIMAL_BATCH_SIZE = 8;
+    
+    // 批处理实现
+    public List<String> processBatch(List<String> inputs) {
+        List<String> results = new ArrayList<>();
+        List<OnnxTensor> batchTensors = new ArrayList<>();
+        
+        // 准备批处理输入
+        for (int i = 0; i < inputs.size(); i += OPTIMAL_BATCH_SIZE) {
+            int endIdx = Math.min(i + OPTIMAL_BATCH_SIZE, inputs.size());
+            List<String> batch = inputs.subList(i, endIdx);
+            
+            // 批量处理
+            OnnxTensor batchTensor = prepareBatchTensor(batch);
+            batchTensors.add(batchTensor);
+        }
+        
+        // 执行批处理
+        for (OnnxTensor batchTensor : batchTensors) {
+            results.addAll(processTensorBatch(batchTensor));
+        }
+        
+        return results;
+    }
+}
+```
+
+- 实现要点：
+  - 动态批大小调整
+  - 并行处理优化
+  - 内存使用优化
+  - 性能监控
+
+#### 2.6.4 JNI优化
+```java
+public class JNIOptimizer {
+    static {
+        System.loadLibrary("translator_native");
+    }
+    
+    // JNI方法声明
+    private native void optimizeModelExecution(long modelHandle);
+    private native void preprocessTensor(ByteBuffer buffer, int size);
+    
+    // JNI优化包装
+    public void optimizeExecution() {
+        try {
+            long modelHandle = getModelHandle();
+            optimizeModelExecution(modelHandle);
+        } catch (Exception e) {
+            Log.e(TAG, "JNI optimization failed", e);
+        }
+    }
+}
+```
+
+- 优化策略：
+  - 原生代码加速
+  - 内存直接访问
+  - 并行计算优化
+  - 硬件加速
+
+### 2.7 错误处理与恢复
+
+#### 2.7.1 异常处理
+```java
+public class TranslationErrorHandler {
+    // 错误码定义
+    private static final int ERROR_MODEL_LOADING = 1001;
+    private static final int ERROR_TOKENIZATION = 1002;
+    private static final int ERROR_TRANSLATION = 1003;
+    
+    // 错误处理实现
+    public void handleError(int errorCode, Exception e) {
+        switch (errorCode) {
+            case ERROR_MODEL_LOADING:
+                handleModelLoadingError(e);
+                break;
+            case ERROR_TOKENIZATION:
+                handleTokenizationError(e);
+                break;
+            case ERROR_TRANSLATION:
+                handleTranslationError(e);
+                break;
+        }
+    }
+    
+    // 恢复策略
+    private void handleModelLoadingError(Exception e) {
+        // 1. 释放资源
+        releaseResources();
+        // 2. 重新加载模型
+        reloadModel();
+        // 3. 通知调用者
+        notifyError(ERROR_MODEL_LOADING);
+    }
+}
+```
+
+- 实现要点：
+  - 错误分类处理
+  - 资源释放管理
+  - 自动恢复机制
+  - 错误日志记录
+
+### 2.8 性能监控
+
+#### 2.8.1 性能指标收集
+```java
+public class PerformanceMonitor {
+    // 性能指标
+    private static class Metrics {
+        long tokenizationTime;
+        long encoderTime;
+        long decoderTime;
+        long totalTime;
+        int inputLength;
+        int outputLength;
+        float memoryUsage;
+    }
+    
+    // 性能监控实现
+    public void collectMetrics(String phase, long startTime) {
+        long endTime = System.nanoTime();
+        Metrics metrics = new Metrics();
+        metrics.totalTime = endTime - startTime;
+        
+        // 记录详细指标
+        recordMetrics(phase, metrics);
+        
+        // 性能分析
+        analyzePerformance(metrics);
+    }
+}
+```
+
+- 监控要点：
+  - 时间性能监控
+  - 内存使用监控
+  - 模型性能分析
+  - 性能报告生成
+
+## 3. 性能优化实现
+
+### 3.1 KV Cache优化
+
+```java
+// Translator.java
+private void initializeCache(OnnxTensor encoderResult, int[] input_ids) {
+    try {
+        // 1. 准备cache初始化输入
+        Map<String, OnnxTensor> cacheInitInput = new HashMap<>();
+        cacheInitInput.put("encoder_output", encoderResult);
+        
+        // 2. 执行cache初始化
+        OrtSession.Result initResult = cacheInitSession.run(cacheInitInput);
+        
+        // 3. 保存key和value cache
+        keyCache = (OnnxTensor) initResult.get("key_cache").get();
+        valueCache = (OnnxTensor) initResult.get("value_cache").get();
+    } catch (OrtException e) {
+        e.printStackTrace();
+    }
+}
+```
+
+### 3.2 模型量化
+
+```java
+// 模型量化配置
+OrtSession.SessionOptions options = new OrtSession.SessionOptions();
+options.setExecutionMode(ExecutionMode.ORT_SEQUENTIAL);
+options.setGraphOptimizationLevel(GraphOptimizationLevel.ORT_ENABLE_ALL);
+
+// int8量化
+options.add_session_config_entry("session.load_model_format", "ORT");
+options.add_session_config_entry("session.use_ort_model_bytes_directly", "1");
+```
+
+## 4. 语言支持实现
+
+### 4.1 语言代码映射
+
+```xml
+<!-- nllb_supported_languages.xml -->
+<languages>
+    <language>
+        <code>en</code>
+        <code_NLLB>eng_Latn</code_NLLB>
+    </language>
+    <language>
+        <code>zh</code>
+        <code_NLLB>zho_Hans</code_NLLB>
+    </language>
+    <!-- 更多语言... -->
+</languages>
+```
+
+### 4.2 语言代码转换
+
+```java
+// Translator.java
+private void initializeNllbLanguagesCodes(Context context) {
+    try {
+        Document document = documentBuilder.parse(
+            context.getResources().openRawResource(R.raw.nllb_supported_languages_all)
+        );
+        NodeList listCode = document.getElementsByTagName("code");
+        NodeList listCodeNllb = document.getElementsByTagName("code_NLLB");
+        
+        for (int i = 0; i < listCode.getLength(); i++) {
+            nllbLanguagesCodes.put(
+                listCode.item(i).getTextContent(),
+                listCodeNllb.item(i).getTextContent()
+            );
+        }
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+}
+```
+
+## 5. 错误处理
+
+```java
+public class ErrorCodes {
+    public static final int ERROR_LOADING_MODEL = 1;
+    public static final int ERROR_EXECUTING_MODEL = 2;
+    public static final int ERROR_TOKENIZATION = 3;
+}
+
+// 错误回调接口
+public interface TranslateListener {
+    void onFailure(int[] reasons, long value);
+    void onSuccess(String translatedText);
+}
+```
+
+## 6. 内存优化
+
+```java
+// Translator.java
+public void optimizeMemory() {
+    // 1. 分离模型组件
+    if (mode == MADLAD_CACHE) {
+        embedSession = onnxEnv.createSession(embedAndLmHeadPath, embedOptions);
+    } else {
+        embedAndLmHeadSession = onnxEnv.createSession(embedAndLmHeadPath, embedOptions);
+    }
+    
+    // 2. 释放不需要的资源
+    decoderOptions.close();
+    encoderOptions.close();
+    cacheInitOptions.close();
+}
+```
+
+## 7. ONNX模型优化实现
+
+### 7.1 模型量化和内存优化
+
+```java
+// NeuralNetworkApi.java
+public class NeuralNetworkApi {
+    public static void testModelIntegrity(@NonNull String testModelPath, InitListener initListener) {
+        try {
+            OrtEnvironment onnxEnv = OrtEnvironment.getEnvironment();
+            OrtSession.SessionOptions testOptions = new OrtSession.SessionOptions();
+            
+            // 禁用内存模式优化以减少内存使用
+            testOptions.setMemoryPatternOptimization(false);
+            testOptions.setCPUArenaAllocator(false);
+            
+            // 对大多数模型禁用优化以保证精度
+            testOptions.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT);
+            
+            OrtSession testSession = onnxEnv.createSession(testModelPath, testOptions);
+        } catch (OrtException e) {
+            initListener.onError(new int[]{ErrorCodes.ERROR_LOADING_MODEL}, 0);
+        }
+    }
+}
+```
+
+### 7.2 Tensor操作优化
+
+```java
+// TensorUtils.java
+public class TensorUtils {
+    // 优化的Tensor创建方法
+    public static OnnxTensor createInt64TensorWithSingleValue(OrtEnvironment onnxEnv, long value, long[] shape) {
+        long flat_length = shape[0];
+        for(int i=1; i<shape.length; i++){
+            flat_length = flat_length * shape[i];
+        }
+        
+        // 使用DirectBuffer优化性能
+        // 可以将执行时间从500ms降低到4ms
+        LongBuffer buffer = ByteBuffer.allocateDirect((int)(flat_length*8))
+                                    .asLongBuffer();
+        
+        return OnnxTensor.createTensor(onnxEnv, buffer, shape);
+    }
+    
+    // 优化的Float Tensor创建
+    public static OnnxTensor createFloatTensor(OrtEnvironment env, float[][][][] data, 
+            long[] shape, long[] timeResult) {
+        float[] dataFlat = flattenFloatArray(data);
+        
+        // 使用DirectBuffer减少Java内存占用
+        ByteBuffer buffer = ByteBuffer.allocateDirect((dataFlat.length*4));
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+        buffer.asFloatBuffer().put(dataFlat);
+        
+        return OnnxTensor.createTensor(env, buffer, shape, OnnxJavaType.FLOAT);
+    }
+}
+```
+
+### 7.3 KV Cache实现
+
+```java
+// CacheContainerNative.java
+public class CacheContainerNative {
+    private int[] shape;
+    private OnnxTensor[] cacheTensors;
+    
+    // 通过JNI调用优化缓存操作
+    public OrtSession.Result getCacheResult(OrtEnvironment env) {
+        String[] names = new String[shape[0]];
+        OnnxValue[] values = new OnnxValue[shape[0]];
+        
+        int count = 0;
+        for (int i = 0; i < shape[0]/2; i++) {
+            for (String suffix: new String[]{"key", "value"}) {
+                names[count] = "present." + i + ".decoder." + suffix;
+                ByteBuffer buffer = getBuffer(cacheContainerNativePointer, count);
+                values[count] = OnnxTensor.createTensor(env, buffer, 
+                    new long[]{shape[1], shape[2], shape[3], shape[4]}, 
+                    OnnxJavaType.FLOAT);
+                count++;
+            }
+        }
+        
+        return new OrtSession.Result(names, values, new boolean[shape[0]]);
+    }
+}
+```
+
+### 7.4 Beam Search解码优化
+
+```java
+// Translator.java
+public void executeCacheDecoderBeam(TokenizerResult input, OnnxTensor encoderResult,
+            ArrayList<Integer>[] completeBeamOutput, double[] beamsOutputsProbabilities,
+            CustomLocale outputLanguage, int beamSize) {
+            
+        // 1. 优化encoder输出的batch处理
+        float[][] encoderValue = ((float[][][]) encoderResult.getValue())[0];
+        float[] encoderValueFlatBatched = TensorUtils.flattenFloatArrayBatched(
+            encoderValue, beamSize);
+        OnnxTensor encoderResultBatched = TensorUtils.createFloatTensor(
+            onnxEnv, 
+            encoderValueFlatBatched,
+            new long[]{beamSize, encoderValue.length, encoderValue[0].length}
+        );
+        
+        // 2. 优化attention mask的batch处理
+        int[] encoderMaskFlatBatched = TensorUtils.flattenIntArrayBatched(
+            input.getAttentionMask(), 
+            beamSize
+        );
+        OnnxTensor encoderAttentionMaskTensorBatched = TensorUtils.createIntTensor(
+            onnxEnv,
+            encoderMaskFlatBatched, 
+            new long[]{beamSize, input.getAttentionMask().length}
+        );
+        
+        // 3. 使用KV Cache优化解码过程
+        while(max != eos) {
+            decoderInput.put("past_key_values." + i + ".decoder.key", 
+                (OnnxTensor) result.get("present." + i + ".decoder.key").get());
+            decoderInput.put("past_key_values." + i + ".decoder.value",
+                (OnnxTensor) result.get("present." + i + ".decoder.value").get());
+        }
+    }
+}
+```
+
+## 8. 性能优化结果
+
+通过以上优化措施，RTranslator在性能上取得了显著提升：
+
+1. NLLB模型优化：
+- RAM占用：从2.5GB降低到1.3GB (提升1.9倍)
+- 75个token的执行时间：从8s降低到2s (提升4倍)
+
+2. Whisper模型优化：
+- RAM占用：从1.4GB降低到0.9GB (提升1.5倍) 
+- 11s音频处理时间：从1.9s降低到1.6s (提升1.2倍)
+
+3. 关键优化点：
+- 使用DirectBuffer优化Tensor操作
+- 实现KV Cache减少重复计算
+- 模型分离减少内存重复
+- 选择性int8量化保持精度
+- JNI优化缓存操作
+- Beam Search的批处理优化
+
+## 9. 内存管理
+
+```java
+// Translator.java
+public class Translator {
+    private void optimizeMemoryUsage() {
+        // 1. 及时释放不需要的资源
+        decoderOptions.close();
+        encoderOptions.close();
+        cacheInitOptions.close();
+        
+        // 2. 清理Tensor缓存
+        if(result != null) {
+            result.close();
+        }
+        
+        // 3. 重用Buffer减少内存分配
+        ByteBuffer buffer = ByteBuffer.allocateDirect((dataFlat.length*4));
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+        
+        // 4. 分离模型组件
+        if(mode == MADLAD_CACHE) {
+            embedSession = onnxEnv.createSession(embedAndLmHeadPath, embedOptions);
+        } else {
+            embedAndLmHeadSession = onnxEnv.createSession(embedAndLmHeadPath, embedOptions);
+        }
+    }
+} 
+```
+
+## 10. 语音识别实现
+
+### 10.1 Whisper模型集成
+
+```java
+// Recognizer.java
+public class Recognizer extends NeuralNetworkApi {
+    private static final int MAX_TOKENS_PER_SECOND = 30;
+    private static final int MAX_TOKENS = 445;
+    
+    // 语音识别主要方法
+    public void recognize(final float[] data, int beamSize, final String languageCode) {
+        new Thread("recognizer") {
+            public void run() {
+                synchronized (lock) {
+                    if (data != null) {
+                        // 1. 添加待识别数据
+                        dataToRecognize.addLast(new DataContainer(data, beamSize, languageCode));
+                        
+                        // 2. 执行Whisper模型
+                        OrtSession.Result outputs = encoderSession.run(encoderInput);
+                        OrtSession.Result outputInit = cacheInitSession.run(initInput);
+                        
+                        // 3. 解码生成文本
+                        String firstText = ((String[][]) detokenizerResult)[0][0];
+                        
+                        // 4. 文本后处理
+                        notifyResult(correctText(firstText), languageCode, confidenceScore);
+                    }
+                }
+            }
+        }
+    }
+    
+    // 文本后处理
+    private String correctText(String text) {
+        String correctedText = text;
+        
+        // 1. 移除时间戳标记
+        correctedText = correctedText.replaceAll("<\\|[^>]*\\|> ", "");
+        
+        // 2. 移除首尾空格
+        correctedText = correctedText.trim();
+        
+        // 3. 首字母大写
+        if(correctedText.length() >= 2) {
+            char firstChar = correctedText.charAt(0);
+            if (Character.isLowerCase(firstChar)) {
+                correctedText = Character.toUpperCase(firstChar) + 
+                              correctedText.substring(1);
+            }
+        }
+        
+        return correctedText;
+    }
+}
+```
+
+### 10.2 语音录制实现
+
+```java
+// VoiceTranslationService.java
+public abstract class VoiceTranslationService extends Service {
+    protected VoiceRecorder mVoiceRecorder;
+    protected TTS tts;
+    
+    // 初始化语音录制器
+    protected void initializeVoiceRecorder() {
+        mVoiceRecorder = new VoiceRecorder(new VoiceRecorder.Callback() {
+            @Override
+            public void onVoiceStart() {
+                if (mVoiceRecognizer != null) {
+                    mVoiceRecognizer.startRecognizing(
+                        mVoiceRecorder.getSampleRate());
+                }
+            }
+            
+            @Override
+            public void onVoice(byte[] data, int size) {
+                if (mVoiceRecognizer != null) {
+                    mVoiceRecognizer.recognize(data, size);
+                }
+            }
+            
+            @Override
+            public void onVoiceEnd() {
+                if (!textRecognized.equals("")) {
+                    textRecognized = "";
+                }
+                notifyVoiceEnd();
+            }
+        });
+    }
+}
+```
+
+## 11. 文本转语音(TTS)实现
+
+### 11.1 TTS封装类
+
+```java
+// TTS.java
+public class TTS {
+    private TextToSpeech tts;
+    private static final ArrayList<CustomLocale> ttsLanguages = new ArrayList<>();
+    
+    public TTS(Context context, final InitListener listener) {
+        tts = new TextToSpeech(context, status -> {
+            if (status == TextToSpeech.SUCCESS) {
+                if (tts != null) {
+                    listener.onInit();
+                    return;
+                }
+            }
+            tts = null;
+            listener.onError(ErrorCodes.GOOGLE_TTS_ERROR);
+        }, null); // 使用系统默认TTS引擎
+    }
+    
+    // 获取支持的语言
+    private static class GetSupportedLanguageRunnable implements Runnable {
+        @Override
+        public void run() {
+            Set<Voice> set = tempTts.getVoices();
+            boolean qualityLow = sharedPreferences.getBoolean(
+                "languagesQualityLow", false);
+            int quality = qualityLow ? 
+                Voice.QUALITY_VERY_LOW : Voice.QUALITY_NORMAL;
+                
+            // 过滤符合质量要求的语言
+            for (Voice voice : set) {
+                if (voice.getQuality() >= quality && 
+                    (qualityLow || !voice.getFeatures()
+                        .contains("legacySetLanguageVoice"))) {
+                    CustomLocale language = new CustomLocale(voice.getLocale());
+                    ttsLanguages.add(language);
+                }
+            }
+        }
+    }
+}
+```
+
+### 11.2 TTS使用实现
+
+```java
+// VoiceTranslationService.java
+public class VoiceTranslationService extends Service {
+    private UtteranceProgressListener ttsListener;
+    
+    private void initializeTTS() {
+        tts = new TTS(this, new TTS.InitListener() {
+            @Override
+            public void onInit() {
+                if(tts != null) {
+                    tts.setOnUtteranceProgressListener(ttsListener);
+                }
+            }
+            
+            @Override
+            public void onError(int reason) {
+                tts = null;
+                notifyError(new int[]{reason}, -1);
+                isAudioMute = true;
+            }
+        });
+    }
+    
+    // 语音合成
+    public synchronized void speak(String text, CustomLocale language) {
+        synchronized (mLock) {
+            if (tts != null && tts.isActive() && !isAudioMute) {
+                utterancesCurrentlySpeaking++;
+                if (shouldDeactivateMicDuringTTS()) {
+                    stopVoiceRecorder();
+                    notifyMicDeactivated();
+                }
+                
+                Bundle params = new Bundle();
+                params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, 
+                    String.valueOf(System.currentTimeMillis()));
+                tts.speak(text, TextToSpeech.QUEUE_ADD, params, null);
+            }
+        }
+    }
+}
+```
+
+### 11.3 语音合成流程
+
+1. 初始化流程：
+- 创建TTS实例
+- 加载系统TTS引擎
+- 初始化语音参数
+- 设置回调监听器
+
+2. 语音合成流程：
+- 检查TTS状态和音频状态
+- 停止语音录制(如果需要)
+- 添加合成参数
+- 执行语音合成
+- 等待合成完成回调
+
+3. 语音质量控制：
+- 支持高质量和低质量模式
+- 根据设备能力选择合适的语音引擎
+- 过滤不符合质量要求的语音
+
+4. 错误处理：
+- TTS引擎初始化失败处理
+- 语音合成错误处理
+- 资源释放和清理
+
+## 12. 语音识别和TTS的性能优化
+
+### 12.1 语音识别优化
+
+```java
+// Recognizer.java
+public class Recognizer {
+    // 1. 批处理优化
+    private void optimizeBatchProcessing() {
+        // 使用KV Cache加速连续识别
+        if(mode == CACHE_MODE) {
+            initializeCache(encoderResult, input_ids);
+        }
+        
+        // 使用Beam Search提高准确性
+        if(beamSize > 1) {
+            executeBeamSearch(input, encoderResult, beamSize);
+        }
+    }
+    
+    // 2. 内存优化
+    private void optimizeMemory() {
+        // 及时释放Tensor
+        if(result != null) {
+            result.close();
+        }
+        
+        // 重用Buffer
+        ByteBuffer buffer = ByteBuffer.allocateDirect(size);
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+    }
+}
+```
+
+### 12.2 TTS优化
+
+```java
+// TTS.java
+public class TTS {
+    // 1. 语音缓存优化
+    private void optimizeTTSCache() {
+        // 缓存常用语音
+        for(Voice voice : getVoices()) {
+            if(isFrequentlyUsed(voice)) {
+                preloadVoice(voice);
+            }
+        }
+    }
+    
+    // 2. 并发控制
+    private synchronized void optimizeConcurrency() {
+        // 控制并发合成数量
+        if(utterancesCurrentlySpeaking < MAX_CONCURRENT_SYNTHESIS) {
+            startNewSynthesis();
+        } else {
+            queueSynthesis();
+        }
+    }
+} 
