@@ -11,6 +11,7 @@
 #include "cache_container.h"
 #include "tokenizer.h"
 #include "beam_search.h"
+#include "model_params.h"
 
 namespace nllb {
 
@@ -36,75 +37,67 @@ public:
         const std::vector<std::string>& texts,
         const std::string& source_lang) const;
 
-    // Cache management
-    void reset_cache();
-    
     // Error handling
     translator::TranslatorError get_last_error() const;
     std::string get_error_message() const;
+    void set_error_callback(std::shared_ptr<translator::TranslatorErrorCallback> callback);
 
     // Parameter settings
     void set_beam_size(int size);
     void set_max_length(int length);
     void set_length_penalty(float penalty);
     void set_temperature(float temp);
-    void set_top_k(float k);
+    void set_top_k(int k);
     void set_top_p(float p);
     void set_repetition_penalty(float penalty);
     void set_num_threads(int threads);
 
+    // Cache management
+    void reset_cache();
+    void clear_cache();
+
 private:
-    // ONNX Runtime environment
+    // ONNX Runtime components
     Ort::Env ort_env_;
     Ort::MemoryInfo memory_info_;
     std::unique_ptr<Ort::Session> encoder_session_;
     std::unique_ptr<Ort::Session> decoder_session_;
-    std::unique_ptr<Ort::Session> cache_initializer_session_;
+    std::unique_ptr<Ort::Session> cache_init_session_;
     std::unique_ptr<Ort::Session> embed_lm_head_session_;
+    std::unique_ptr<Ort::Session> embed_session_;
 
-    // Core components
+    // Tokenizer and cache
     std::unique_ptr<Tokenizer> tokenizer_;
-    std::unique_ptr<BeamSearchDecoder> beam_search_decoder_;
-    mutable std::unique_ptr<CacheContainer> cache_container_;
+    mutable CacheContainer cache_container_;
 
     // Configuration
     std::string model_dir_;
     std::string target_lang_;
+    ModelParams model_params_;
     bool is_initialized_;
-    mutable std::mutex translation_mutex_;
-    mutable std::atomic<bool> is_translating_{false};
-    mutable translator::TranslatorError last_error_{translator::TranslatorError::OK};
-    mutable std::string error_message_;
 
-    // Language mapping
-    std::unordered_map<std::string, std::string> nllb_language_codes_;
-    std::unordered_map<std::string, std::string> display_language_codes_;
+    // Language support
     std::vector<std::string> supported_languages_;
     std::vector<std::string> low_quality_languages_;
 
-    // Model parameters
-    struct ModelParams {
-        int beam_size{5};
-        int max_length{128};
-        float length_penalty{1.0f};
-        float temperature{1.0f};
-        float top_k{0};
-        float top_p{0.9f};
-        float repetition_penalty{0.9f};
-        int num_threads{4};
-        int hidden_size{1024};
-        bool support_low_quality_languages{false};
-    } model_params_;
+    // Error handling
+    mutable translator::TranslatorError last_error_;
+    mutable std::string error_message_;
+    std::shared_ptr<translator::TranslatorErrorCallback> error_callback_;
 
     // Helper methods
-    std::vector<float> run_encoder(const TokenizerResult& tokens) const;
-    std::vector<float> run_embed_lm_head(const std::vector<int64_t>& input_ids) const;
-    void set_error(translator::TranslatorError error, const std::string& message) const;
-    void initialize_language_codes();
-    void load_supported_languages();
+    void load_language_config();
     std::string normalize_language_code(const std::string& lang_code) const;
-    std::string get_nllb_language_code(const std::string& lang_code) const;
+    void set_error(translator::TranslatorError error, const std::string& message) const;
+    void notify_error(const translator::TranslatorErrorInfo& error) const;
+
+    // Translation pipeline methods
+    Ort::Value run_encoder(const std::vector<int64_t>& input_ids) const;
+    std::vector<int64_t> run_decoder(const Ort::Value& encoder_output,
+                                   const std::vector<int64_t>& encoder_shape) const;
     std::string get_display_language_code(const std::string& nllb_code) const;
+    
+    // Tensor utilities
     Ort::Value create_tensor(const std::vector<int64_t>& data, 
                             const std::vector<int64_t>& shape) const;
     Ort::Value create_tensor(const std::vector<float>& data, 

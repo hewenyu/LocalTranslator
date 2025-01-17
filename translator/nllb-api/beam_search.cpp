@@ -108,7 +108,7 @@ std::vector<float> BeamSearchDecoder::compute_next_token_scores(
     const ModelParams& params) const {
     
     // Get logits from embed_lm_head model
-    auto input_tensor = TensorUtils::createInt64Tensor(
+    auto input_tensor = TensorUtils::createTensor<int64_t>(
         memory_info,
         prev_tokens,
         {1, static_cast<int64_t>(prev_tokens.size())}

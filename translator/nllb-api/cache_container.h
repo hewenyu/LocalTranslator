@@ -21,19 +21,16 @@ public:
     void add_cache_to_inputs(std::vector<Ort::Value>& inputs) const;
 
     // Update cache with new values
-    void update_cache(const Ort::Value& new_cache);
+    void update_cache(std::vector<Ort::Value>&& new_cache);
+
+    // Get current cache
+    const std::vector<Ort::Value>& get_cache() const;
 
     // Clear cache
-    void clear() { cache_.clear(); }
-
-    // Get cache size
-    size_t size() const { return cache_.size(); }
-
-    // Check if cache is empty
-    bool empty() const { return cache_.empty(); }
+    void clear();
 
 private:
-    std::vector<Ort::Value> cache_;
+    std::vector<Ort::Value> cache_values_;
 };
 
 } // namespace nllb 

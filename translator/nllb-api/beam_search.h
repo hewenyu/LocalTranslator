@@ -4,21 +4,9 @@
 #include <memory>
 #include <onnxruntime_cxx_api.h>
 #include "cache_container.h"
+#include "model_params.h"
 
 namespace nllb {
-
-struct ModelParams {
-    int beam_size = 5;
-    int max_length = 128;
-    float length_penalty = 1.0f;
-    float temperature = 1.0f;
-    float top_k = 0;
-    float top_p = 0.9f;
-    float repetition_penalty = 1.0f;
-    int num_threads = 4;
-    int hidden_size = 1024;
-    bool support_low_quality_languages = false;
-};
 
 class BeamHypothesis {
 public:
@@ -27,6 +15,9 @@ public:
     bool done;
 
     BeamHypothesis() : score(0.0f), done(false) {}
+    
+    BeamHypothesis(const std::vector<int64_t>& tokens_, float score_, bool done_)
+        : tokens(tokens_), score(score_), done(done_) {}
 };
 
 class BeamSearchDecoder {

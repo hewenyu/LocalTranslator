@@ -222,23 +222,53 @@ std::vector<float> NLLBTranslator::run_encoder(const TokenizerResult& tokens) co
     
     // Input IDs tensor
     std::vector<int64_t> input_shape = {1, static_cast<int64_t>(tokens.input_ids.size())};
-    input_tensors.push_back(create_tensor<int64_t>(
-        memory_info_, tokens.input_ids.data(), tokens.input_ids.size(), input_shape));
+    input_tensors.push_back(create_tensor(tokens.input_ids, input_shape));
         
     // Attention mask tensor
-    input_tensors.push_back(create_tensor<int64_t>(
-        memory_info_, tokens.attention_mask.data(), tokens.attention_mask.size(), input_shape));
+    input_tensors.push_back(create_tensor(tokens.attention_mask, input_shape));
+    
+    // Get input/output names
+    const char* input_names[] = {"input_ids", "attention_mask"};
+    const char* output_names[] = {"encoder_outputs"};
         
     // Run encoder
     auto output_tensors = encoder_session_->Run(
         Ort::RunOptions{nullptr},
-        encoder_session_->GetInputNames().data(),
+        input_names,
         input_tensors.data(),
         input_tensors.size(),
-        encoder_session_->GetOutputNames().data(),
-        encoder_session_->GetOutputNames().size());
+        output_names,
+        1);
         
     // Get encoder output
+    auto* output_data = output_tensors[0].GetTensorData<float>();
+    size_t output_size = output_tensors[0].GetTensorTypeAndShapeInfo().GetElementCount();
+    
+    return std::vector<float>(output_data, output_data + output_size);
+}
+
+std::vector<float> NLLBTranslator::run_embed_lm_head(const std::vector<int64_t>& input_ids) const {
+    // Create input tensor
+    std::vector<int64_t> input_shape = {1, static_cast<int64_t>(input_ids.size())};
+    auto input_tensor = create_tensor(input_ids, input_shape);
+    
+    std::vector<Ort::Value> input_tensors;
+    input_tensors.push_back(std::move(input_tensor));
+    
+    // Get input/output names
+    const char* input_names[] = {"input_ids"};
+    const char* output_names[] = {"logits"};
+    
+    // Run model
+    auto output_tensors = embed_lm_head_session_->Run(
+        Ort::RunOptions{nullptr},
+        input_names,
+        input_tensors.data(),
+        input_tensors.size(),
+        output_names,
+        1);
+        
+    // Get output
     auto* output_data = output_tensors[0].GetTensorData<float>();
     size_t output_size = output_tensors[0].GetTensorTypeAndShapeInfo().GetElementCount();
     
@@ -248,6 +278,14 @@ std::vector<float> NLLBTranslator::run_encoder(const TokenizerResult& tokens) co
 void NLLBTranslator::set_error(translator::TranslatorError error, const std::string& message) const {
     last_error_ = error;
     error_message_ = message;
+    
+    translator::TranslatorErrorInfo error_info{
+        error,
+        message,
+        "NLLB Translator Error"
+    };
+    
+    notify_error(error_info);
 }
 
 translator::TranslatorError NLLBTranslator::get_last_error() const {
@@ -256,6 +294,102 @@ translator::TranslatorError NLLBTranslator::get_last_error() const {
 
 std::string NLLBTranslator::get_error_message() const {
     return error_message_;
+}
+
+void NLLBTranslator::set_error_callback(std::shared_ptr<translator::TranslatorErrorCallback> callback) {
+    error_callback_ = callback;
+}
+
+void NLLBTranslator::notify_error(const translator::TranslatorErrorInfo& error) const {
+    if (error_callback_) {
+        error_callback_->onError(error);
+    }
+}
+
+void NLLBTranslator::reset_cache() {
+    try {
+        cache_container_.reset();
+    } catch (const std::exception& e) {
+        set_error(translator::TranslatorError::ERROR_CACHE, 
+                 std::string("Failed to reset cache: ") + e.what());
+    }
+}
+
+void NLLBTranslator::clear_cache() {
+    try {
+        cache_container_.clear();
+    } catch (const std::exception& e) {
+        set_error(translator::TranslatorError::ERROR_CACHE, 
+                 std::string("Failed to clear cache: ") + e.what());
+    }
+}
+
+// Parameter settings
+void NLLBTranslator::set_beam_size(int size) {
+    if (size <= 0) {
+        set_error(translator::TranslatorError::ERROR_INVALID_PARAM, 
+                 "Beam size must be positive");
+        return;
+    }
+    model_params_.beam_size = size;
+}
+
+void NLLBTranslator::set_max_length(int length) {
+    if (length <= 0) {
+        set_error(translator::TranslatorError::ERROR_INVALID_PARAM, 
+                 "Max length must be positive");
+        return;
+    }
+    model_params_.max_length = length;
+}
+
+void NLLBTranslator::set_length_penalty(float penalty) {
+    model_params_.length_penalty = penalty;
+}
+
+void NLLBTranslator::set_temperature(float temp) {
+    if (temp <= 0) {
+        set_error(translator::TranslatorError::ERROR_INVALID_PARAM, 
+                 "Temperature must be positive");
+        return;
+    }
+    model_params_.temperature = temp;
+}
+
+void NLLBTranslator::set_top_k(int k) {
+    if (k < 0) {
+        set_error(translator::TranslatorError::ERROR_INVALID_PARAM, 
+                 "Top-k must be non-negative");
+        return;
+    }
+    model_params_.top_k = k;
+}
+
+void NLLBTranslator::set_top_p(float p) {
+    if (p <= 0 || p > 1) {
+        set_error(translator::TranslatorError::ERROR_INVALID_PARAM, 
+                 "Top-p must be in (0, 1]");
+        return;
+    }
+    model_params_.top_p = p;
+}
+
+void NLLBTranslator::set_repetition_penalty(float penalty) {
+    if (penalty < 1) {
+        set_error(translator::TranslatorError::ERROR_INVALID_PARAM, 
+                 "Repetition penalty must be >= 1");
+        return;
+    }
+    model_params_.repetition_penalty = penalty;
+}
+
+void NLLBTranslator::set_num_threads(int threads) {
+    if (threads <= 0) {
+        set_error(translator::TranslatorError::ERROR_INVALID_PARAM, 
+                 "Number of threads must be positive");
+        return;
+    }
+    model_params_.num_threads = threads;
 }
 
 } // namespace nllb 

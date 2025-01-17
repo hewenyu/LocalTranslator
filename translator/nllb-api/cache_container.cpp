@@ -12,7 +12,7 @@ void CacheContainer::initialize(
     
     try {
         // Create input tensor
-        auto input_tensor = TensorUtils::createFloatTensor(
+        auto input_tensor = TensorUtils::createTensor<float>(
             memory_info,
             encoder_output,
             encoder_shape
@@ -35,7 +35,7 @@ void CacheContainer::initialize(
         );
         
         // Store cache
-        cache_ = std::move(outputs);
+        cache_values_ = std::move(outputs);
         
     } catch (const Ort::Exception& e) {
         throw std::runtime_error("Failed to initialize cache: " + std::string(e.what()));
@@ -43,14 +43,23 @@ void CacheContainer::initialize(
 }
 
 void CacheContainer::add_cache_to_inputs(std::vector<Ort::Value>& inputs) const {
-    if (!cache_.empty()) {
-        inputs.insert(inputs.end(), cache_.begin(), cache_.end());
+    if (!cache_values_.empty()) {
+        for (auto& cache_value : cache_values_) {
+            inputs.push_back(std::move(cache_value));
+        }
     }
 }
 
-void CacheContainer::update_cache(const Ort::Value& new_cache) {
-    cache_.clear();
-    cache_.push_back(new_cache);
+void CacheContainer::update_cache(std::vector<Ort::Value>&& new_cache) {
+    cache_values_ = std::move(new_cache);
+}
+
+const std::vector<Ort::Value>& CacheContainer::get_cache() const {
+    return cache_values_;
+}
+
+void CacheContainer::clear() {
+    cache_values_.clear();
 }
 
 } // namespace nllb 

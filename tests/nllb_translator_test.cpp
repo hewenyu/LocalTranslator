@@ -5,6 +5,15 @@
 #include <string>
 #include <filesystem>
 
+// 自定义错误回调类
+class TestErrorCallback : public translator::TranslatorErrorCallback {
+public:
+    void onError(const translator::TranslatorErrorInfo& error) override {
+        last_error = error;
+    }
+    translator::TranslatorErrorInfo last_error;
+};
+
 class NLLBTranslatorTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -36,6 +45,8 @@ protected:
         config.nllb.params.support_low_quality_languages = false;
         
         translator = std::make_unique<nllb::NLLBTranslator>(config);
+        error_callback = std::make_shared<TestErrorCallback>();
+        translator->set_error_callback(error_callback);
     }
 
     void TearDown() override {
@@ -43,6 +54,7 @@ protected:
     }
 
     std::unique_ptr<nllb::NLLBTranslator> translator;
+    std::shared_ptr<TestErrorCallback> error_callback;
 };
 
 TEST_F(NLLBTranslatorTest, BasicTranslation) {
@@ -51,6 +63,7 @@ TEST_F(NLLBTranslatorTest, BasicTranslation) {
     
     auto result = translator->translate(input, source_lang);
     EXPECT_FALSE(result.empty());
+    EXPECT_EQ(translator->get_last_error(), translator::TranslatorError::OK);
 }
 
 TEST_F(NLLBTranslatorTest, LongTextTranslation) {
@@ -60,40 +73,43 @@ TEST_F(NLLBTranslatorTest, LongTextTranslation) {
     
     auto result = translator->translate(input, source_lang);
     EXPECT_FALSE(result.empty());
+    EXPECT_EQ(translator->get_last_error(), translator::TranslatorError::OK);
 }
 
 TEST_F(NLLBTranslatorTest, ErrorHandling) {
     // Test with empty input
     auto result = translator->translate("", "eng_Latn");
     EXPECT_TRUE(result.empty());
-    EXPECT_NE(translator->get_last_error(), translator::TranslatorError::OK);
+    EXPECT_EQ(translator->get_last_error(), translator::TranslatorError::ERROR_EMPTY_INPUT);
+    EXPECT_EQ(error_callback->last_error.error_code, translator::TranslatorError::ERROR_EMPTY_INPUT);
     
     // Test with invalid language code
     result = translator->translate("Hello", "invalid_lang");
     EXPECT_TRUE(result.empty());
-    EXPECT_NE(translator->get_last_error(), translator::TranslatorError::OK);
+    EXPECT_EQ(translator->get_last_error(), translator::TranslatorError::ERROR_UNSUPPORTED_LANGUAGE);
+    EXPECT_EQ(error_callback->last_error.error_code, translator::TranslatorError::ERROR_UNSUPPORTED_LANGUAGE);
 }
 
 TEST_F(NLLBTranslatorTest, ParameterSettings) {
-    // Test beam size
-    translator->set_beam_size(3);
-    auto result = translator->translate("Hello", "eng_Latn");
-    EXPECT_FALSE(result.empty());
+    // Test invalid beam size
+    translator->set_beam_size(-1);
+    EXPECT_EQ(translator->get_last_error(), translator::TranslatorError::ERROR_INVALID_PARAM);
+    EXPECT_EQ(error_callback->last_error.error_code, translator::TranslatorError::ERROR_INVALID_PARAM);
     
-    // Test temperature
-    translator->set_temperature(0.8f);
-    result = translator->translate("Hello", "eng_Latn");
-    EXPECT_FALSE(result.empty());
+    // Test invalid temperature
+    translator->set_temperature(0.0f);
+    EXPECT_EQ(translator->get_last_error(), translator::TranslatorError::ERROR_INVALID_PARAM);
+    EXPECT_EQ(error_callback->last_error.error_code, translator::TranslatorError::ERROR_INVALID_PARAM);
     
-    // Test top_k
-    translator->set_top_k(5);
-    result = translator->translate("Hello", "eng_Latn");
-    EXPECT_FALSE(result.empty());
+    // Test invalid top_k
+    translator->set_top_k(-1);
+    EXPECT_EQ(translator->get_last_error(), translator::TranslatorError::ERROR_INVALID_PARAM);
+    EXPECT_EQ(error_callback->last_error.error_code, translator::TranslatorError::ERROR_INVALID_PARAM);
     
-    // Test top_p
-    translator->set_top_p(0.95f);
-    result = translator->translate("Hello", "eng_Latn");
-    EXPECT_FALSE(result.empty());
+    // Test invalid top_p
+    translator->set_top_p(1.5f);
+    EXPECT_EQ(translator->get_last_error(), translator::TranslatorError::ERROR_INVALID_PARAM);
+    EXPECT_EQ(error_callback->last_error.error_code, translator::TranslatorError::ERROR_INVALID_PARAM);
 }
 
 TEST_F(NLLBTranslatorTest, BatchTranslation) {
@@ -106,6 +122,8 @@ TEST_F(NLLBTranslatorTest, BatchTranslation) {
     
     auto results = translator->translate_batch(inputs, source_lang);
     EXPECT_EQ(results.size(), inputs.size());
+    EXPECT_EQ(translator->get_last_error(), translator::TranslatorError::OK);
+    
     for (const auto& result : results) {
         EXPECT_FALSE(result.empty());
     }
@@ -114,11 +132,18 @@ TEST_F(NLLBTranslatorTest, BatchTranslation) {
 TEST_F(NLLBTranslatorTest, CacheManagement) {
     // Test translation with cache reset
     auto result1 = translator->translate("Hello", "eng_Latn");
-    translator->reset_cache();
-    auto result2 = translator->translate("Hello", "eng_Latn");
-    
     EXPECT_FALSE(result1.empty());
+    EXPECT_EQ(translator->get_last_error(), translator::TranslatorError::OK);
+    
+    translator->reset_cache();
+    EXPECT_EQ(translator->get_last_error(), translator::TranslatorError::OK);
+    
+    auto result2 = translator->translate("Hello", "eng_Latn");
     EXPECT_FALSE(result2.empty());
+    EXPECT_EQ(translator->get_last_error(), translator::TranslatorError::OK);
+    
+    translator->clear_cache();
+    EXPECT_EQ(translator->get_last_error(), translator::TranslatorError::OK);
 }
 
 int main(int argc, char** argv) {
