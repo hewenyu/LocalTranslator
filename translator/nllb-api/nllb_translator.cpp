@@ -117,7 +117,11 @@ void NLLBTranslator::initialize_language_codes() {
             auto code = lang->FirstChildElement("code");
             auto nllb_code = lang->FirstChildElement("code_NLLB");
             if (code && nllb_code) {
-                nllb_language_codes_[code->GetText()] = nllb_code->GetText();
+                std::string code_str = code->GetText();
+                std::string nllb_code_str = nllb_code->GetText();
+                nllb_language_codes_[code_str] = nllb_code_str;
+                supported_languages_.push_back(code_str);
+                spdlog::debug("Added language mapping: {} -> {}", code_str, nllb_code_str);
             }
         }
         spdlog::info("Loaded {} language codes", nllb_language_codes_.size());
@@ -216,265 +220,58 @@ void NLLBTranslator::load_models() {
 }
 
 std::vector<float> NLLBTranslator::run_encoder(const Tokenizer::TokenizerOutput& tokens) const {
-    spdlog::debug("Running encoder with input length: {}", tokens.input_ids.size());
-    auto start_time = std::chrono::high_resolution_clock::now();
-
     try {
-        // 1. 获取embeddings
-        auto embeddings = run_embedding(tokens.input_ids);
-        spdlog::debug("Generated embeddings");
-        
-        // 2. 准备encoder输入
         auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
-        std::array<int64_t, 2> input_shape{1, static_cast<int64_t>(tokens.input_ids.size())};
         
-        // 创建input_ids tensor
-        auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(memory_info,
-            const_cast<int64_t*>(tokens.input_ids.data()),
-            tokens.input_ids.size(), input_shape.data(), input_shape.size());
-            
-        // 创建attention_mask tensor
-        auto attention_mask_tensor = Ort::Value::CreateTensor<int64_t>(memory_info,
-            const_cast<int64_t*>(tokens.attention_mask.data()),
-            tokens.attention_mask.size(), input_shape.data(), input_shape.size());
-            
-        // 创建embeddings tensor
-        std::array<int64_t, 3> embed_shape{1, static_cast<int64_t>(tokens.input_ids.size()), model_config_.hidden_size};
-        auto embed_tensor = Ort::Value::CreateTensor<float>(memory_info,
-            embeddings.data(), embeddings.size(), embed_shape.data(), embed_shape.size());
-        
-        // 3. 运行encoder
-        const char* encoder_input_names[] = {"input_ids", "attention_mask", "embed_matrix"};
-        std::vector<Ort::Value> encoder_inputs;
-        encoder_inputs.push_back(std::move(input_ids_tensor));
-        encoder_inputs.push_back(std::move(attention_mask_tensor));
-        encoder_inputs.push_back(std::move(embed_tensor));
-        
-        const char* encoder_output_names[] = {"last_hidden_state"};
-        auto encoder_outputs = encoder_session_->Run(
-            Ort::RunOptions{nullptr},
-            encoder_input_names,
-            encoder_inputs.data(),
-            encoder_inputs.size(),
-            encoder_output_names,
-            1
-        );
+        // 准备输入张量
+        std::vector<int64_t> input_shape = {1, static_cast<int64_t>(tokens.input_ids.size())};
+        auto input_tensor = Ort::Value::CreateTensor<int64_t>(
+            memory_info, tokens.input_ids.data(), tokens.input_ids.size(), input_shape.data(), input_shape.size());
 
-        // 获取输出数据
-        const float* output_data = encoder_outputs[0].GetTensorData<float>();
-        size_t output_size = encoder_outputs[0].GetTensorTypeAndShapeInfo().GetElementCount();
-        std::vector<float> result(output_data, output_data + output_size);
-        
+        // 运行编码器
+        auto start_time = std::chrono::high_resolution_clock::now();
+        auto output_tensors = encoder_session_->Run(
+            Ort::RunOptions{nullptr},
+            {"input_ids"},
+            &input_tensor,
+            1,
+            {"encoder_outputs"}
+        );
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
         spdlog::debug("Encoder completed in {} ms", duration.count());
-        
-        return result;
-    } catch (const std::exception& e) {
-        spdlog::error("Encoder failed: {}", e.what());
-        throw;
+
+        // 获取输出
+        float* output_data = output_tensors[0].GetTensorMutableData<float>();
+        size_t output_size = output_tensors[0].GetTensorTypeAndShapeInfo().GetElementCount();
+        return std::vector<float>(output_data, output_data + output_size);
+    } catch (const Ort::Exception& e) {
+        spdlog::error("ONNX Runtime error in encoder: {}", e.what());
+        throw std::runtime_error("Encoder failed: " + std::string(e.what()));
     }
 }
 
 std::vector<int64_t> NLLBTranslator::run_decoder(
     const std::vector<float>& encoder_output,
     const std::string& target_lang) const {
-    
-    spdlog::debug("Running decoder for target language: {}", target_lang);
-    auto start_time = std::chrono::high_resolution_clock::now();
-
     try {
-        // 创建缓存状态
-        CacheState cache(
-            params_.max_length,
-            model_config_.hidden_size,
-            model_config_.num_heads
-        );
+        auto start_time = std::chrono::high_resolution_clock::now();
         
-        // 准备encoder输出tensor
-        auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
-        std::array<int64_t, 3> encoder_shape{1, static_cast<int64_t>(encoder_output.size() / model_config_.hidden_size), model_config_.hidden_size};
-        auto encoder_tensor = Ort::Value::CreateTensor<float>(memory_info,
-            const_cast<float*>(encoder_output.data()),
-            encoder_output.size(), encoder_shape.data(), encoder_shape.size());
-            
         // 初始化beam search
-        std::vector<BeamHypothesis> hypotheses;
-        hypotheses.emplace_back(std::vector<int64_t>{tokenizer_->bos_id()}, 0.0f);
+        BeamSearchState state(beam_config_);
+        state.initialize_from_encoder_output(encoder_output);
         
-        // 主循环
-        for (int step = 0; step < params_.max_length; ++step) {
-            std::vector<BeamHypothesis> new_hypotheses;
-            
-            for (const auto& hyp : hypotheses) {
-                if (hyp.is_done) {
-                    new_hypotheses.push_back(hyp);
-                    continue;
-                }
-                
-                // 准备decoder输入
-                std::array<int64_t, 2> input_shape{1, static_cast<int64_t>(hyp.tokens.size())};
-                auto input_ids_tensor = Ort::Value::CreateTensor<int64_t>(memory_info,
-                    const_cast<int64_t*>(hyp.tokens.data()),
-                    hyp.tokens.size(), input_shape.data(), input_shape.size());
-                    
-                // 运行decoder
-                const char* decoder_input_names[] = {"input_ids", "encoder_hidden_states"};
-                std::vector<Ort::Value> decoder_inputs;
-                decoder_inputs.push_back(std::move(input_ids_tensor));
-                decoder_inputs.push_back(std::move(encoder_tensor));
-                
-                const char* decoder_output_names[] = {"logits"};
-                auto decoder_outputs = decoder_session_->Run(
-                    Ort::RunOptions{nullptr},
-                    decoder_input_names,
-                    decoder_inputs.data(),
-                    decoder_inputs.size(),
-                    decoder_output_names,
-                    1
-                );
-                
-                // 获取logits
-                float* logits_data = decoder_outputs[0].GetTensorMutableData<float>();
-                size_t vocab_size = decoder_outputs[0].GetTensorTypeAndShapeInfo().GetShape()[2];
-                
-                // 计算最后一个token的概率分布
-                std::vector<float> scores(logits_data + (hyp.tokens.size() - 1) * vocab_size,
-                                        logits_data + hyp.tokens.size() * vocab_size);
-                
-                // 应用softmax
-                float max_score = *std::max_element(scores.begin(), scores.end());
-                float sum = 0.0f;
-                for (auto& score : scores) {
-                    score = std::exp(score - max_score);
-                    sum += score;
-                }
-                for (auto& score : scores) {
-                    score /= sum;
-                }
-
-                // 应用重复惩罚
-                for (size_t i = 0; i < scores.size(); ++i) {
-                    if (std::find(hyp.tokens.begin(), hyp.tokens.end(), i) != hyp.tokens.end()) {
-                        scores[i] *= params_.repetition_penalty;
-                    }
-                }
-
-                // 应用温度
-                if (params_.temperature > 0) {
-                    for (auto& score : scores) {
-                        score /= params_.temperature;
-                    }
-                }
-
-                // 应用top-k采样
-                if (params_.top_k > 0) {
-                    std::vector<std::pair<float, size_t>> score_idx;
-                    score_idx.reserve(scores.size());
-                    for (size_t i = 0; i < scores.size(); ++i) {
-                        score_idx.emplace_back(scores[i], i);
-                    }
-                    std::partial_sort(score_idx.begin(), 
-                                    score_idx.begin() + params_.top_k,
-                                    score_idx.end(),
-                                    std::greater<>());
-                    std::fill(scores.begin(), scores.end(), 0.0f);
-                    for (int i = 0; i < params_.top_k; ++i) {
-                        scores[score_idx[i].second] = score_idx[i].first;
-                    }
-                }
-
-                // 应用top-p采样
-                if (params_.top_p < 1.0f) {
-                    std::vector<std::pair<float, size_t>> score_idx;
-                    score_idx.reserve(scores.size());
-                    for (size_t i = 0; i < scores.size(); ++i) {
-                        score_idx.emplace_back(scores[i], i);
-                    }
-                    std::sort(score_idx.begin(), score_idx.end(), std::greater<>());
-                    float cumsum = 0.0f;
-                    size_t last_idx = score_idx.size();
-                    for (size_t i = 0; i < score_idx.size(); ++i) {
-                        cumsum += score_idx[i].first;
-                        if (cumsum > params_.top_p) {
-                            last_idx = i + 1;
-                            break;
-                        }
-                    }
-                    std::fill(scores.begin(), scores.end(), 0.0f);
-                    for (size_t i = 0; i < last_idx; ++i) {
-                        scores[score_idx[i].second] = score_idx[i].first;
-                    }
-                }
-
-                // 为每个token创建新的候选序列
-                for (size_t i = 0; i < scores.size(); ++i) {
-                    auto new_tokens = hyp.tokens;
-                    new_tokens.push_back(i);
-                    
-                    float new_score = hyp.score + std::log(scores[i]);
-                    bool is_done = (i == tokenizer_->eos_id());
-                    
-                    // 应用长度惩罚
-                    float length_penalty = std::pow((5.0f + new_tokens.size()) / 6.0f, 
-                                                  params_.length_penalty);
-                    new_score /= length_penalty;
-                    
-                    // 如果生成了EOS，应用EOS惩罚
-                    if (is_done) {
-                        new_score *= 0.9f;  // EOS penalty
-                    }
-                    
-                    new_hypotheses.emplace_back(new_tokens, new_score, is_done);
-                }
-            }
-
-            // 选择最好的beam_size个候选序列
-            std::partial_sort(new_hypotheses.begin(),
-                            new_hypotheses.begin() + params_.beam_size,
-                            new_hypotheses.end(),
-                            [](const BeamHypothesis& a, const BeamHypothesis& b) {
-                                return a.score > b.score;
-                            });
-
-            hypotheses.clear();
-            auto copy_size = std::min<size_t>(params_.beam_size, new_hypotheses.size());
-            hypotheses.insert(
-                hypotheses.begin(),
-                new_hypotheses.begin(),
-                new_hypotheses.begin() + copy_size
-            );
-
-            // 检查是否需要提前停止
-            if (step > 0 && step % 10 == 0) {
-                float best_score = hypotheses[0].score;
-                bool no_improvement = true;
-                for (size_t i = 1; i < hypotheses.size(); ++i) {
-                    if (hypotheses[i].score > best_score * 0.9f) {
-                        no_improvement = false;
-                        break;
-                    }
-                }
-                if (no_improvement) {
-                    break;
-                }
-            }
+        // 生成序列
+        while (!state.is_finished()) {
+            auto next_token = beam_search_decoder_->generate_next_token(state);
+            state.append_token(next_token);
         }
-
-        // 对所有未完成的序列添加EOS标记
-        for (auto& hyp : hypotheses) {
-            if (!hyp.is_done) {
-                hyp.tokens.push_back(tokenizer_->eos_id());
-                hyp.is_done = true;
-            }
-        }
-
+        
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
         spdlog::debug("Decoder completed in {} ms", duration.count());
-
-        // 返回最好的序列
-        return hypotheses[0].tokens;
+        
+        return state.get_best_sequence();
     } catch (const std::exception& e) {
         spdlog::error("Decoder failed: {}", e.what());
         throw;
@@ -497,6 +294,8 @@ std::string NLLBTranslator::translate(const std::string& text, const std::string
 
     // 获取翻译锁
     std::lock_guard<std::mutex> lock(translation_mutex_);
+    
+    // 使用局部变量来处理原子操作
     bool expected = false;
     if (!is_translating_.compare_exchange_strong(expected, true)) {
         throw std::runtime_error("Translation already in progress");
@@ -531,8 +330,10 @@ std::string NLLBTranslator::translate(const std::string& text, const std::string
 }
 
 std::string NLLBTranslator::get_nllb_language_code(const std::string& lang_code) const {
-    auto it = nllb_language_codes_.find(lang_code);
+    auto normalized_code = normalize_language_code(lang_code);
+    auto it = nllb_language_codes_.find(normalized_code);
     if (it == nllb_language_codes_.end()) {
+        spdlog::error("Unsupported language code: {}", lang_code);
         throw std::runtime_error("Unsupported language code: " + lang_code);
     }
     return it->second;
@@ -612,15 +413,20 @@ void NLLBTranslator::load_supported_languages() {
 }
 
 std::string NLLBTranslator::normalize_language_code(const std::string& lang_code) const {
-    // 转换为小写
+    // 移除区域标识符，只保留主要语言代码
     std::string normalized = lang_code;
-    std::transform(normalized.begin(), normalized.end(), normalized.begin(), ::tolower);
-    
-    // 移除区域代码
-    size_t dash_pos = normalized.find('-');
-    if (dash_pos != std::string::npos) {
-        normalized = normalized.substr(0, dash_pos);
+    size_t hyphen_pos = normalized.find('-');
+    if (hyphen_pos != std::string::npos) {
+        normalized = normalized.substr(0, hyphen_pos);
     }
+    
+    size_t underscore_pos = normalized.find('_');
+    if (underscore_pos != std::string::npos) {
+        normalized = normalized.substr(0, underscore_pos);
+    }
+    
+    // 转换为小写
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), ::tolower);
     
     return normalized;
 }
@@ -633,7 +439,14 @@ std::string NLLBTranslator::detect_language(const std::string& text) const {
 }
 
 bool NLLBTranslator::needs_translation(const std::string& source_lang) const {
-    return normalize_language_code(source_lang) != normalize_language_code(target_lang_);
+    try {
+        auto normalized_source = normalize_language_code(source_lang);
+        auto normalized_target = normalize_language_code(target_lang_);
+        return normalized_source != normalized_target;
+    } catch (const std::exception& e) {
+        spdlog::error("Error checking translation need: {}", e.what());
+        return true;
+    }
 }
 
 std::vector<std::string> NLLBTranslator::get_supported_languages() const {
@@ -641,28 +454,57 @@ std::vector<std::string> NLLBTranslator::get_supported_languages() const {
 }
 
 bool NLLBTranslator::is_language_supported(const std::string& lang_code) const {
-    std::string normalized = normalize_language_code(lang_code);
-    return std::find(supported_languages_.begin(), supported_languages_.end(), normalized) 
-           != supported_languages_.end();
+    auto normalized_code = normalize_language_code(lang_code);
+    return nllb_language_codes_.find(normalized_code) != nllb_language_codes_.end();
 }
 
 std::vector<std::string> NLLBTranslator::translate_batch(
     const std::vector<std::string>& texts, const std::string& source_lang) const {
-    std::vector<std::string> results;
-    results.reserve(texts.size());
-    
-    std::lock_guard<std::mutex> lock(translation_mutex_);
-    
-    for (const auto& text : texts) {
-        try {
-            results.push_back(translate(text, source_lang));
-        } catch (const std::exception& e) {
-            spdlog::error("Failed to translate text: {}", e.what());
-            results.push_back(text);  // 失败时返回原文
-        }
+    if (!is_initialized_) {
+        throw std::runtime_error("Translator not initialized");
     }
-    
-    return results;
+
+    if (texts.empty()) {
+        return std::vector<std::string>();
+    }
+
+    // 检查源语言是否需要翻译
+    if (!needs_translation(source_lang)) {
+        return texts;
+    }
+
+    // 获取翻译锁
+    std::lock_guard<std::mutex> lock(translation_mutex_);
+    bool expected = false;
+    if (!is_translating_.compare_exchange_strong(expected, true)) {
+        throw std::runtime_error("Translation already in progress");
+    }
+
+    try {
+        spdlog::info("Starting batch translation from {} to {}, batch size: {}", 
+                     source_lang, target_lang_, texts.size());
+        
+        std::string src_lang_nllb = get_nllb_language_code(source_lang);
+        std::string tgt_lang_nllb = get_nllb_language_code(target_lang_);
+        
+        std::vector<std::string> results;
+        results.reserve(texts.size());
+
+        // 批量处理
+        for (const auto& text : texts) {
+            auto tokens = tokenizer_->encode(text, src_lang_nllb, tgt_lang_nllb);
+            auto encoder_output = run_encoder(tokens);
+            auto output_ids = run_decoder(encoder_output, tgt_lang_nllb);
+            results.push_back(tokenizer_->decode(output_ids));
+        }
+
+        is_translating_.store(false);
+        return results;
+    } catch (const std::exception& e) {
+        is_translating_.store(false);
+        spdlog::error("Batch translation failed: {}", e.what());
+        throw std::runtime_error("Batch translation failed: " + std::string(e.what()));
+    }
 }
 
 } // namespace nllb 
