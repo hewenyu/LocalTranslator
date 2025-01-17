@@ -30,13 +30,9 @@ NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config)
         std::string decoder_path = model_dir_ + "/decoder.onnx";
         std::string cache_init_path = model_dir_ + "/cache_init.onnx";
         
-        std::wstring wencoder_path(encoder_path.begin(), encoder_path.end());
-        std::wstring wdecoder_path(decoder_path.begin(), decoder_path.end());
-        std::wstring wcache_init_path(cache_init_path.begin(), cache_init_path.end());
-        
-        encoder_session_ = std::make_unique<Ort::Session>(ort_env_, wencoder_path.c_str(), session_options);
-        decoder_session_ = std::make_unique<Ort::Session>(ort_env_, wdecoder_path.c_str(), session_options);
-        cache_init_session_ = std::make_unique<Ort::Session>(ort_env_, wcache_init_path.c_str(), session_options);
+        encoder_session_ = std::make_unique<Ort::Session>(ort_env_, encoder_path.c_str(), session_options);
+        decoder_session_ = std::make_unique<Ort::Session>(ort_env_, decoder_path.c_str(), session_options);
+        cache_init_session_ = std::make_unique<Ort::Session>(ort_env_, cache_init_path.c_str(), session_options);
         
         // 初始化分词器
         std::string vocab_path = model_dir_ + "/sentencepiece.model";
@@ -291,17 +287,13 @@ std::string NLLBTranslator::get_target_language() const {
 }
 
 bool NLLBTranslator::needs_translation(const std::string& source_lang) const {
-    auto src_normalized = normalize_language_code(source_lang);
-    auto tgt_normalized = normalize_language_code(target_lang_);
-    return src_normalized != tgt_normalized;
+    return normalize_language_code(source_lang) != normalize_language_code(target_lang_);
 }
 
 // 配置管理方法实现
 void NLLBTranslator::set_support_low_quality_languages(bool support) {
-    if (model_config_.support_low_quality_languages != support) {
-        model_config_.support_low_quality_languages = support;
-        load_supported_languages();
-    }
+    model_config_.support_low_quality_languages = support;
+    load_supported_languages();
 }
 
 bool NLLBTranslator::get_support_low_quality_languages() const {
@@ -391,95 +383,81 @@ std::vector<std::string> NLLBTranslator::translate_batch(
         return {};
     }
     
-    // 检查是否需要翻译
-    if (!needs_translation(source_lang)) {
-        return texts;
-    }
-    
     std::lock_guard<std::mutex> lock(translation_mutex_);
     is_translating_ = true;
     
     try {
-        // 1. 批量分词
+        // Tokenize all texts
         std::vector<Tokenizer::TokenizerOutput> batch_tokens;
-        batch_tokens.reserve(texts.size());
-        
         for (const auto& text : texts) {
             batch_tokens.push_back(tokenizer_->encode(text, source_lang, target_lang_));
         }
         
-        // 2. 批量编码
+        // Run encoder for batch
         auto batch_encoder_output = run_encoder_batch(batch_tokens);
         
-        // 3. 并行解码
+        // Process each sequence in parallel
         std::vector<std::string> results(texts.size());
-        std::vector<std::future<void>> futures;
+        std::vector<std::unique_ptr<CacheContainer>> thread_caches;
         
-        const size_t num_threads = std::min(
-            static_cast<size_t>(std::thread::hardware_concurrency()),
-            texts.size()
-        );
-        
-        std::vector<std::unique_ptr<CacheContainer>> thread_caches(num_threads);
-        for (size_t i = 0; i < num_threads; ++i) {
-            thread_caches[i] = std::make_unique<CacheContainer>();
+        // Create cache containers for each thread
+        for (size_t i = 0; i < texts.size(); i++) {
+            thread_caches.push_back(std::make_unique<CacheContainer>());
         }
         
-        // 分配工作给线程
-        for (size_t i = 0; i < texts.size(); i += num_threads) {
-            for (size_t t = 0; t < num_threads && (i + t) < texts.size(); ++t) {
-                futures.push_back(std::async(std::launch::async,
-                    [this, i, t, &batch_encoder_output, &results, &thread_caches, &batch_tokens]() {
-                        const size_t idx = i + t;
-                        const auto& tokens = batch_tokens[idx];
-                        
-                        // 获取当前文本的编码器输出
-                        std::vector<float> encoder_output(
-                            batch_encoder_output.begin() + idx * model_config_.hidden_size,
-                            batch_encoder_output.begin() + (idx + 1) * model_config_.hidden_size
-                        );
-                        
-                        std::vector<int64_t> encoder_shape = {1, static_cast<int64_t>(tokens.input_ids.size()),
-                                            static_cast<int64_t>(model_config_.hidden_size)};
-                        
-                        // 初始化缓存
-                        thread_caches[t]->initialize(*cache_init_session_, memory_info_,
-                                                  encoder_output, encoder_shape);
-                        
-                        // Beam Search 解码
-                        auto hypotheses = beam_search_decoder_->decode(
-                            *decoder_session_,
-                            memory_info_,
-                            encoder_output,
-                            encoder_shape,
-                            *thread_caches[t]
-                        );
-                        
-                        // 选择最佳假设
-                        auto best_hypothesis = std::max_element(
-                            hypotheses.begin(),
-                            hypotheses.end(),
-                            [](const auto& a, const auto& b) { return a.score < b.score; }
-                        );
-                        
-                        // 保存结果
-                        results[idx] = tokenizer_->decode(best_hypothesis->tokens);
-                    }
-                ));
-            }
-            
-            // 等待当前批次完成
-            for (auto& future : futures) {
-                future.wait();
-            }
-            futures.clear();
+        // Process sequences in parallel
+        std::vector<std::future<void>> futures;
+        for (size_t i = 0; i < texts.size(); i++) {
+            futures.push_back(std::async(std::launch::async,
+                [this, i, &batch_encoder_output, &results, &thread_caches, &batch_tokens]() {
+                    // Extract encoder output for this sequence
+                    std::vector<float> encoder_output(
+                        batch_encoder_output.begin() + i * model_config_.hidden_size,
+                        batch_encoder_output.begin() + (i + 1) * model_config_.hidden_size
+                    );
+                    
+                    std::vector<int64_t> encoder_shape = {
+                        1,
+                        static_cast<int64_t>(batch_tokens[i].input_ids.size()),
+                        static_cast<int64_t>(model_config_.hidden_size)
+                    };
+                    
+                    // Initialize cache for this sequence
+                    thread_caches[i]->initialize(*cache_init_session_, memory_info_,
+                                              encoder_output, encoder_shape);
+                    
+                    // Beam search decode
+                    auto hypotheses = beam_search_decoder_->decode(
+                        *decoder_session_,
+                        memory_info_,
+                        encoder_output,
+                        encoder_shape,
+                        *thread_caches[i]
+                    );
+                    
+                    // Select best hypothesis
+                    auto best_hypothesis = std::max_element(
+                        hypotheses.begin(),
+                        hypotheses.end(),
+                        [](const auto& a, const auto& b) { return a.score < b.score; }
+                    );
+                    
+                    // Store result
+                    results[i] = tokenizer_->decode(best_hypothesis->tokens);
+                }
+            ));
+        }
+        
+        // Wait for all sequences to complete
+        for (auto& future : futures) {
+            future.get();
         }
         
         is_translating_ = false;
         return results;
         
     } catch (const std::exception& e) {
-        set_error(TranslatorError::ERROR_BATCH_PROCESSING, e.what());
+        set_error(TranslatorError::ERROR_DECODE, e.what());
         is_translating_ = false;
         return {};
     }
@@ -489,59 +467,49 @@ std::vector<float> NLLBTranslator::run_encoder_batch(
     const std::vector<Tokenizer::TokenizerOutput>& batch_tokens) const {
     
     try {
-        // 1. 计算最大序列长度
+        // Prepare batch input tensors
+        std::vector<int64_t> batch_input_ids;
+        std::vector<int64_t> batch_attention_mask;
         size_t max_length = 0;
+        
+        // Find max sequence length in batch
         for (const auto& tokens : batch_tokens) {
             max_length = std::max(max_length, tokens.input_ids.size());
         }
         
-        // 2. 准备批处理输入
-        const size_t batch_size = batch_tokens.size();
-        std::vector<int64_t> batch_input_ids;
-        std::vector<int64_t> batch_attention_mask;
-        
-        batch_input_ids.reserve(batch_size * max_length);
-        batch_attention_mask.reserve(batch_size * max_length);
-        
-        // 填充输入
+        // Pad sequences to max length
         for (const auto& tokens : batch_tokens) {
-            // 复制当前序列的 input_ids
-            batch_input_ids.insert(batch_input_ids.end(),
-                                 tokens.input_ids.begin(),
+            batch_input_ids.insert(batch_input_ids.end(), 
+                                 tokens.input_ids.begin(), 
                                  tokens.input_ids.end());
-            
-            // 填充到最大长度
             batch_input_ids.insert(batch_input_ids.end(),
                                  max_length - tokens.input_ids.size(),
                                  tokenizer_->pad_id());
-            
-            // 复制当前序列的 attention_mask
+                                 
             batch_attention_mask.insert(batch_attention_mask.end(),
-                                     tokens.attention_mask.begin(),
-                                     tokens.attention_mask.end());
-            
-            // 填充 attention_mask
+                                      tokens.attention_mask.begin(),
+                                      tokens.attention_mask.end());
             batch_attention_mask.insert(batch_attention_mask.end(),
-                                     max_length - tokens.attention_mask.size(),
-                                     0);
+                                      max_length - tokens.attention_mask.size(),
+                                      0);
         }
         
-        // 3. 创建输入 tensors
+        // Create input tensors
         auto input_tensor = TensorUtils::createInt64Tensor(
             memory_info_,
             batch_input_ids,
-            {static_cast<int64_t>(batch_size),
+            {static_cast<int64_t>(batch_tokens.size()), 
              static_cast<int64_t>(max_length)}
         );
         
         auto attention_mask = TensorUtils::createInt64Tensor(
             memory_info_,
             batch_attention_mask,
-            {static_cast<int64_t>(batch_size),
+            {static_cast<int64_t>(batch_tokens.size()), 
              static_cast<int64_t>(max_length)}
         );
         
-        // 4. 运行编码器
+        // Run encoder
         std::vector<Ort::Value> ort_inputs;
         ort_inputs.push_back(std::move(input_tensor));
         ort_inputs.push_back(std::move(attention_mask));
@@ -558,7 +526,6 @@ std::vector<float> NLLBTranslator::run_encoder_batch(
             1
         );
         
-        // 5. 获取输出
         return TensorUtils::getTensorData<float>(outputs[0]);
         
     } catch (const Ort::Exception& e) {
