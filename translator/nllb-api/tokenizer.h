@@ -3,58 +3,80 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <array>
-#include <sentencepiece_processor.h>
+#include <unordered_map>
+#include "sentencepiece_processor.h"
 
 namespace nllb {
+
+class TokenizerResult {
+public:
+    std::vector<int64_t> input_ids;
+    std::vector<int64_t> attention_mask;
+    
+    TokenizerResult() = default;
+    TokenizerResult(std::vector<int64_t>&& ids, std::vector<int64_t>&& mask)
+        : input_ids(std::move(ids)), attention_mask(std::move(mask)) {}
+};
+
+// Memory pool for tokenizer results
+class TokenizerMemoryPool {
+public:
+    TokenizerResult acquire() {
+        if (pool_.empty()) {
+            return TokenizerResult();
+        }
+        auto result = std::move(pool_.back());
+        pool_.pop_back();
+        return result;
+    }
+
+    void release(TokenizerResult&& result) {
+        if (pool_.size() < max_pool_size_) {
+            result.input_ids.clear();
+            result.attention_mask.clear();
+            pool_.push_back(std::move(result));
+        }
+    }
+
+private:
+    static constexpr size_t max_pool_size_ = 32;
+    std::vector<TokenizerResult> pool_;
+};
 
 class Tokenizer {
 public:
     explicit Tokenizer(const std::string& model_path);
     ~Tokenizer() = default;
 
-    struct TokenizerOutput {
-        std::vector<int64_t> input_ids;
-        std::vector<int64_t> attention_mask;
-    };
+    // Disable copy
+    Tokenizer(const Tokenizer&) = delete;
+    Tokenizer& operator=(const Tokenizer&) = delete;
 
-    // Tokenize text for translation
-    TokenizerOutput encode(const std::string& text,
+    // Enable move
+    Tokenizer(Tokenizer&&) = default;
+    Tokenizer& operator=(Tokenizer&&) = default;
+
+    TokenizerResult encode(const std::string& text, 
                          const std::string& source_lang,
                          const std::string& target_lang) const;
 
-    // Decode tokens back to text
-    std::string decode(const std::vector<int64_t>& tokens) const;
-
-    // Special token IDs
-    int64_t pad_id() const { return pad_id_; }
-    int64_t eos_id() const { return eos_id_; }
-    int64_t bos_id() const { return bos_id_; }
-    int64_t unk_id() const { return unk_id_; }
-
-    // Get language ID
-    int64_t get_language_id(const std::string& language) const;
+    std::string decode(const std::vector<int64_t>& ids) const;
+    
+    int64_t eos_id() const;
+    int64_t pad_id() const;
+    int64_t bos_id() const;
 
 private:
-    std::unique_ptr<sentencepiece::SentencePieceProcessor> sp_;
-    
-    // Special token IDs
-    int64_t pad_id_ = 0;
-    int64_t eos_id_ = 2;
-    int64_t bos_id_ = 1;
-    int64_t unk_id_ = 3;
+    std::unique_ptr<sentencepiece::SentencePieceProcessor> sp_processor_;
+    mutable TokenizerMemoryPool memory_pool_;
 
-    // Dictionary length
-    static constexpr int DICTIONARY_LENGTH = 256000;
+    // Cache for special tokens
+    int64_t eos_token_id_{0};
+    int64_t pad_token_id_{1};
+    int64_t bos_token_id_{2};
 
-    // NLLB supported languages
-    static constexpr size_t NLLB_LANGUAGES_COUNT = 200;  // 实际语言数量
-    static const std::array<const char*, NLLB_LANGUAGES_COUNT> NLLB_LANGUAGES;
-
-    // Helper methods
-    std::string add_language_tokens(const std::string& text,
-                                  const std::string& source_lang,
-                                  const std::string& target_lang) const;
+    // Language code cache
+    mutable std::unordered_map<std::string, std::string> lang_code_cache_;
 };
 
 } // namespace nllb 

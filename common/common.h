@@ -29,16 +29,18 @@ struct NLLBConfig {
 
     // Model parameters
     struct Parameters {
-        int beam_size = 5;  // Beam search size
-        int max_length = 128;  // Maximum sequence length
-        float length_penalty = 1.0f;  // Length penalty for beam search
-        bool use_cache = true;  // Whether to use decoder cache
-        int num_threads = 1;  // Number of threads for model inference
-        float temperature = 1.0f;  // Temperature for sampling
-        int top_k = 0;  // Top-k sampling parameter
-        float top_p = 0.9f;  // Top-p (nucleus) sampling parameter
-        float repetition_penalty = 0.9f;  // Penalty for repeated tokens
-    } params;
+        int beam_size{5};
+        int max_length{128};
+        float length_penalty{1.0f};
+        float temperature{1.0f};
+        float top_k{0};
+        float top_p{0.9f};
+        float repetition_penalty{0.9f};
+        int num_threads{4};
+        int hidden_size{1024};  // Added hidden_size parameter
+    };
+    
+    Parameters params;
 };
 
 // struct for translator config

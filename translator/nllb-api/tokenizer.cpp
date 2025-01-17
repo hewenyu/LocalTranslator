@@ -1,100 +1,89 @@
 #include "tokenizer.h"
 #include <stdexcept>
 #include <spdlog/spdlog.h>
-#include <algorithm>
 
 namespace nllb {
 
-Tokenizer::Tokenizer(const std::string& model_path) {
-    sp_ = std::make_unique<sentencepiece::SentencePieceProcessor>();
-    auto status = sp_->Load(model_path);
+Tokenizer::Tokenizer(const std::string& model_path) 
+    : sp_processor_(std::make_unique<sentencepiece::SentencePieceProcessor>()) {
+    
+    auto status = sp_processor_->Load(model_path);
     if (!status.ok()) {
-        throw std::runtime_error("Failed to load tokenizer model: " + status.ToString());
+        throw std::runtime_error("Failed to load SentencePiece model: " + 
+                               std::string(status.message()));
     }
-    spdlog::info("Loaded tokenizer model from: {}", model_path);
+
+    // Initialize special tokens
+    eos_token_id_ = sp_processor_->eos_id();
+    pad_token_id_ = sp_processor_->pad_id();
+    bos_token_id_ = sp_processor_->bos_id();
+
+    spdlog::info("Tokenizer initialized with model: {}", model_path);
 }
 
-Tokenizer::TokenizerOutput Tokenizer::encode(
+TokenizerResult Tokenizer::encode(
     const std::string& text,
     const std::string& source_lang,
     const std::string& target_lang) const {
     
     try {
-        // 添加语言标记
-        std::string processed_text = add_language_tokens(text, source_lang, target_lang);
+        // Get a TokenizerResult from pool
+        auto result = memory_pool_.acquire();
         
-        // 使用SentencePiece进行分词
-        std::vector<int> piece_ids;
-        auto status = sp_->Encode(processed_text, &piece_ids);
+        // Prepare input text with language tokens
+        std::string processed_text = source_lang + " " + text + " " + target_lang;
+        
+        // Encode text
+        std::vector<int> tmp_ids;
+        auto status = sp_processor_->Encode(processed_text, &tmp_ids);
         if (!status.ok()) {
-            throw std::runtime_error("Tokenization failed: " + status.ToString());
+            throw std::runtime_error("Failed to encode text: " + 
+                                   std::string(status.message()));
         }
-
-        // 转换为int64_t
-        std::vector<int64_t> input_ids;
-        input_ids.reserve(piece_ids.size());
-        for (int id : piece_ids) {
-            input_ids.push_back(static_cast<int64_t>(id));
+        
+        // Convert to int64_t and prepare attention mask
+        result.input_ids.resize(tmp_ids.size());
+        result.attention_mask.resize(tmp_ids.size(), 1);
+        
+        for (size_t i = 0; i < tmp_ids.size(); ++i) {
+            result.input_ids[i] = static_cast<int64_t>(tmp_ids[i]);
         }
-
-        // 创建attention mask
-        std::vector<int64_t> attention_mask(input_ids.size(), 1);
-
-        return {input_ids, attention_mask};
+        
+        return result;
     } catch (const std::exception& e) {
-        throw std::runtime_error("Encoding failed: " + std::string(e.what()));
+        spdlog::error("Error in tokenizer encode: {}", e.what());
+        throw;
     }
 }
 
-std::string Tokenizer::decode(const std::vector<int64_t>& tokens) const {
+std::string Tokenizer::decode(const std::vector<int64_t>& ids) const {
     try {
-        // 转换为int
-        std::vector<int> piece_ids;
-        piece_ids.reserve(tokens.size());
-        for (int64_t id : tokens) {
-            piece_ids.push_back(static_cast<int>(id));
+        // Convert int64_t to int for SentencePiece
+        std::vector<int> tmp_ids;
+        tmp_ids.reserve(ids.size());
+        
+        for (const auto& id : ids) {
+            if (id != pad_token_id_) {  // Skip padding tokens
+                tmp_ids.push_back(static_cast<int>(id));
+            }
         }
-
-        // 使用SentencePiece进行解码
-        std::string text;
-        auto status = sp_->Decode(piece_ids, &text);
+        
+        std::string result;
+        auto status = sp_processor_->Decode(tmp_ids, &result);
         if (!status.ok()) {
-            throw std::runtime_error("Decoding failed: " + status.ToString());
+            throw std::runtime_error("Failed to decode tokens: " + 
+                                   std::string(status.message()));
         }
-
-        return text;
+        
+        return result;
     } catch (const std::exception& e) {
-        throw std::runtime_error("Decoding failed: " + std::string(e.what()));
+        spdlog::error("Error in tokenizer decode: {}", e.what());
+        throw;
     }
 }
 
-int64_t Tokenizer::get_language_id(const std::string& language) const {
-    // 在NLLB_LANGUAGES中查找语言代码
-    auto it = std::find_if(NLLB_LANGUAGES.begin(), NLLB_LANGUAGES.end(),
-                          [&language](const char* lang) {
-                              return language == lang;
-                          });
-    
-    if (it == NLLB_LANGUAGES.end()) {
-        throw std::runtime_error("Unsupported language: " + language);
-    }
-    
-    return static_cast<int64_t>(std::distance(NLLB_LANGUAGES.begin(), it));
-}
-
-std::string Tokenizer::add_language_tokens(
-    const std::string& text,
-    const std::string& source_lang,
-    const std::string& target_lang) const {
-    
-    return "__" + source_lang + "__ " + text + " __" + target_lang + "__";
-}
-
-// 定义支持的语言列表
-const std::array<const char*, Tokenizer::NLLB_LANGUAGES_COUNT> Tokenizer::NLLB_LANGUAGES = {
-    "ace_Arab", "ace_Latn", "acm_Arab", "acq_Arab", "aeb_Arab", "afr_Latn", "ajp_Arab",
-    "aka_Latn", "amh_Ethi", "apc_Arab", "arb_Arab", "ars_Arab", "ary_Arab", "arz_Arab",
-    // ... 添加更多语言代码
-};
+int64_t Tokenizer::eos_id() const { return eos_token_id_; }
+int64_t Tokenizer::pad_id() const { return pad_token_id_; }
+int64_t Tokenizer::bos_id() const { return bos_token_id_; }
 
 } // namespace nllb 
