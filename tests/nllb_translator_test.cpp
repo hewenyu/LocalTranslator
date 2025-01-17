@@ -53,15 +53,10 @@ TEST_F(NLLBTranslatorTest, BasicTranslation) {
     const std::string input = "Hello, how are you?";
     const std::string source_lang = "eng_Latn";
     
-    try {
-        spdlog::info("Attempting to translate: '{}'", input);
-        std::string result = translator->translate(input, source_lang);
-        EXPECT_FALSE(result.empty());
-        spdlog::info("Translation result: '{}'", result);
-    } catch (const std::exception& e) {
-        spdlog::error("Translation failed: {}", e.what());
-        FAIL() << "Translation failed: " << e.what();
-    }
+    std::string result = translator->translate(input, source_lang);
+    EXPECT_FALSE(result.empty());
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::OK);
+    spdlog::info("Translation result: '{}'", result);
 }
 
 // 测试中文到英文的翻译
@@ -69,13 +64,10 @@ TEST_F(NLLBTranslatorTest, ChineseToEnglish) {
     const std::string input = "你好，最近过得怎么样？";
     const std::string source_lang = "zho_Hans";
     
-    try {
-        std::string result = translator->translate(input, source_lang);
-        EXPECT_FALSE(result.empty());
-        spdlog::info("Chinese to English: {}", result);
-    } catch (const std::exception& e) {
-        FAIL() << "Chinese to English translation failed: " << e.what();
-    }
+    std::string result = translator->translate(input, source_lang);
+    EXPECT_FALSE(result.empty());
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::OK);
+    spdlog::info("Chinese to English: {}", result);
 }
 
 // 测试语言代码转换
@@ -103,11 +95,55 @@ TEST_F(NLLBTranslatorTest, LowQualityLanguageSupport) {
     EXPECT_FALSE(languages.empty());
 }
 
-// 测试EOS惩罚系数设置
-TEST_F(NLLBTranslatorTest, EOSPenaltyConfig) {
-    const float new_penalty = 0.8f;
-    translator->set_eos_penalty(new_penalty);
-    EXPECT_FLOAT_EQ(translator->get_eos_penalty(), new_penalty);
+// 测试翻译参数配置
+TEST_F(NLLBTranslatorTest, TranslationParameters) {
+    // 测试 beam size
+    translator->set_beam_size(3);
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::OK);
+    translator->set_beam_size(-1);
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::ERROR_INVALID_PARAM);
+    
+    // 测试 max length
+    translator->set_max_length(200);
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::OK);
+    translator->set_max_length(0);
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::ERROR_INVALID_PARAM);
+    
+    // 测试 temperature
+    translator->set_temperature(0.8f);
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::OK);
+    translator->set_temperature(-1.0f);
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::ERROR_INVALID_PARAM);
+    
+    // 测试 top_p
+    translator->set_top_p(0.9f);
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::OK);
+    translator->set_top_p(1.5f);
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::ERROR_INVALID_PARAM);
+    
+    // 测试 repetition penalty
+    translator->set_repetition_penalty(1.2f);
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::OK);
+    translator->set_repetition_penalty(-0.5f);
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::ERROR_INVALID_PARAM);
+}
+
+// 测试错误处理
+TEST_F(NLLBTranslatorTest, ErrorHandling) {
+    // 测试空输入
+    std::string result = translator->translate("", "eng_Latn");
+    EXPECT_TRUE(result.empty());
+    
+    // 测试无效的源语言
+    result = translator->translate("Hello", "invalid_lang");
+    EXPECT_TRUE(result.empty());
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::ERROR_INVALID_PARAM);
+    
+    // 测试未初始化的翻译器
+    translator.reset();
+    result = translator->translate("Hello", "eng_Latn");
+    EXPECT_TRUE(result.empty());
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::ERROR_INIT);
 }
 
 // 测试长文本翻译
@@ -119,13 +155,10 @@ TEST_F(NLLBTranslatorTest, LongTextTranslation) {
                              "context throughout the text.";
     const std::string source_lang = "eng_Latn";
     
-    try {
-        std::string result = translator->translate(input, source_lang);
-        EXPECT_FALSE(result.empty());
-        spdlog::info("Long text translation result: {}", result);
-    } catch (const std::exception& e) {
-        FAIL() << "Long text translation failed: " << e.what();
-    }
+    std::string result = translator->translate(input, source_lang);
+    EXPECT_FALSE(result.empty());
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::OK);
+    spdlog::info("Long text translation result: {}", result);
 }
 
 // 测试批量翻译
@@ -137,15 +170,12 @@ TEST_F(NLLBTranslatorTest, BatchTranslation) {
     };
     const std::string source_lang = "eng_Latn";
     
-    try {
-        auto results = translator->translate_batch(inputs, source_lang);
-        EXPECT_EQ(results.size(), inputs.size());
-        for (size_t i = 0; i < results.size(); ++i) {
-            EXPECT_FALSE(results[i].empty());
-            spdlog::info("Batch translation result {}: {}", i, results[i]);
-        }
-    } catch (const std::exception& e) {
-        FAIL() << "Batch translation failed: " << e.what();
+    auto results = translator->translate_batch(inputs, source_lang);
+    EXPECT_EQ(results.size(), inputs.size());
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::OK);
+    for (size_t i = 0; i < results.size(); ++i) {
+        EXPECT_FALSE(results[i].empty());
+        spdlog::info("Batch translation result {}: {}", i, results[i]);
     }
 }
 
@@ -154,13 +184,10 @@ TEST_F(NLLBTranslatorTest, SpecialCharacters) {
     const std::string input = "Hello! @#$%^&*()_+ 你好！";
     const std::string source_lang = "eng_Latn";
     
-    try {
-        std::string result = translator->translate(input, source_lang);
-        EXPECT_FALSE(result.empty());
-        spdlog::info("Special characters translation: {}", result);
-    } catch (const std::exception& e) {
-        FAIL() << "Special characters translation failed: " << e.what();
-    }
+    std::string result = translator->translate(input, source_lang);
+    EXPECT_FALSE(result.empty());
+    EXPECT_EQ(translator->get_last_error(), TranslatorError::OK);
+    spdlog::info("Special characters translation: {}", result);
 }
 
 int main(int argc, char **argv) {

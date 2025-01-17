@@ -339,7 +339,8 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
 
 std::string NLLBTranslator::translate(const std::string& text, const std::string& source_lang) const {
     if (!is_initialized_) {
-        throw std::runtime_error("Translator not initialized");
+        set_error(TranslatorError::ERROR_INIT, "Translator not initialized");
+        return "";
     }
 
     if (text.empty()) {
@@ -357,7 +358,8 @@ std::string NLLBTranslator::translate(const std::string& text, const std::string
     // 使用局部变量来处理原子操作
     bool expected = false;
     if (!is_translating_.compare_exchange_strong(expected, true)) {
-        throw std::runtime_error("Translation already in progress");
+        set_error(TranslatorError::ERROR_INVALID_PARAM, "Translation already in progress");
+        return "";
     }
 
     try {
@@ -369,22 +371,39 @@ std::string NLLBTranslator::translate(const std::string& text, const std::string
 
         // 对输入文本进行分词
         auto tokens = tokenizer_->encode(text, src_lang_nllb, tgt_lang_nllb);
+        if (tokens.input_ids.empty()) {
+            set_error(TranslatorError::ERROR_TOKENIZE, "Failed to tokenize input text");
+            is_translating_.store(false);
+            return "";
+        }
         
         // 运行编码器
         auto encoder_output = run_encoder(tokens);
+        if (encoder_output.empty()) {
+            set_error(TranslatorError::ERROR_ENCODE, "Failed to encode input");
+            is_translating_.store(false);
+            return "";
+        }
         
         // 运行解码器
         auto output_ids = run_decoder(encoder_output, tgt_lang_nllb);
+        if (output_ids.empty()) {
+            set_error(TranslatorError::ERROR_DECODE, "Failed to decode output");
+            is_translating_.store(false);
+            return "";
+        }
         
         // 将输出转换为文本
         std::string result = tokenizer_->decode(output_ids);
         
         is_translating_.store(false);
+        last_error_ = TranslatorError::OK;
+        error_message_.clear();
         return result;
     } catch (const std::exception& e) {
         is_translating_.store(false);
-        spdlog::error("Translation failed: {}", e.what());
-        throw std::runtime_error("Translation failed: " + std::string(e.what()));
+        set_error(TranslatorError::ERROR_MEMORY, "Translation failed: " + std::string(e.what()));
+        return "";
     }
 }
 
@@ -596,6 +615,75 @@ std::vector<std::string> NLLBTranslator::translate_batch(
         spdlog::error("Batch translation failed: {}", e.what());
         throw std::runtime_error("Batch translation failed: " + std::string(e.what()));
     }
+}
+
+void NLLBTranslator::set_error(TranslatorError error, const std::string& message) const {
+    last_error_ = error;
+    error_message_ = message;
+    spdlog::error("Translator error: {}", message);
+}
+
+TranslatorError NLLBTranslator::get_last_error() const {
+    return last_error_;
+}
+
+std::string NLLBTranslator::get_error_message() const {
+    return error_message_;
+}
+
+void NLLBTranslator::set_beam_size(int size) {
+    if (size <= 0) {
+        set_error(TranslatorError::ERROR_INVALID_PARAM, "Beam size must be positive");
+        return;
+    }
+    params_.beam_size = size;
+    beam_config_.beam_size = size;
+}
+
+void NLLBTranslator::set_max_length(int length) {
+    if (length <= 0) {
+        set_error(TranslatorError::ERROR_INVALID_PARAM, "Max length must be positive");
+        return;
+    }
+    params_.max_length = length;
+    beam_config_.max_length = length;
+}
+
+void NLLBTranslator::set_length_penalty(float penalty) {
+    params_.length_penalty = penalty;
+    beam_config_.length_penalty = penalty;
+}
+
+void NLLBTranslator::set_temperature(float temp) {
+    if (temp <= 0) {
+        set_error(TranslatorError::ERROR_INVALID_PARAM, "Temperature must be positive");
+        return;
+    }
+    params_.temperature = temp;
+    beam_config_.temperature = temp;
+}
+
+void NLLBTranslator::set_top_k(float k) {
+    params_.top_k = k;
+    beam_config_.top_k = k;
+}
+
+void NLLBTranslator::set_top_p(float p) {
+    if (p < 0 || p > 1) {
+        set_error(TranslatorError::ERROR_INVALID_PARAM, "Top-p must be between 0 and 1");
+        return;
+    }
+    params_.top_p = p;
+    beam_config_.top_p = p;
+}
+
+void NLLBTranslator::set_repetition_penalty(float penalty) {
+    if (penalty < 0) {
+        set_error(TranslatorError::ERROR_INVALID_PARAM, "Repetition penalty must be non-negative");
+        return;
+    }
+    params_.repetition_penalty = penalty;
+    beam_config_.repetition_penalty = penalty;
 }
 
 } // namespace nllb 
