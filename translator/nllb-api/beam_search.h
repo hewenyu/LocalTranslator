@@ -1,23 +1,24 @@
 #pragma once
 
 #include <vector>
-#include <functional>
-#include <stdexcept>
-#include <random>
+#include <memory>
+#include <queue>
+#include <cmath>
+#include <numeric>
+#include <algorithm>
 
 namespace nllb {
 
-// Beam搜索的配置参数
 struct BeamSearchConfig {
-    int beam_size;           // beam大小
-    int max_length;         // 最大生成长度
-    float length_penalty;   // 长度惩罚系数
-    float eos_penalty;      // EOS标记惩罚
-    int num_return_sequences; // 返回的序列数量
-    float temperature;      // 温度参数，控制采样随机性
-    float top_k;           // top-k采样参数
-    float top_p;           // nucleus采样参数
-    float repetition_penalty; // 重复惩罚系数
+    int beam_size;
+    int max_length;
+    float length_penalty;
+    float eos_penalty;
+    int num_return_sequences;
+    float temperature;
+    float top_k;
+    float top_p;
+    float repetition_penalty;
 
     BeamSearchConfig(
         int beam_size = 5,
@@ -29,118 +30,149 @@ struct BeamSearchConfig {
         float top_k = 0,
         float top_p = 0.9f,
         float repetition_penalty = 0.9f)
-        : beam_size(beam_size)
-        , max_length(max_length)
-        , length_penalty(length_penalty)
-        , eos_penalty(eos_penalty)
-        , num_return_sequences(num_return_sequences)
-        , temperature(temperature)
-        , top_k(top_k)
-        , top_p(top_p)
-        , repetition_penalty(repetition_penalty) {
-        validate();
-    }
-
-    void validate() const {
-        if (beam_size <= 0) throw std::invalid_argument("beam_size must be positive");
-        if (max_length <= 0) throw std::invalid_argument("max_length must be positive");
-        if (length_penalty < 0) throw std::invalid_argument("length_penalty must be non-negative");
-        if (eos_penalty < 0) throw std::invalid_argument("eos_penalty must be non-negative");
-        if (num_return_sequences <= 0) throw std::invalid_argument("num_return_sequences must be positive");
-        if (num_return_sequences > beam_size) throw std::invalid_argument("num_return_sequences cannot exceed beam_size");
-        if (temperature <= 0) throw std::invalid_argument("temperature must be positive");
-        if (top_k < 0) throw std::invalid_argument("top_k must be non-negative");
-        if (top_p <= 0 || top_p > 1) throw std::invalid_argument("top_p must be in (0, 1]");
-        if (repetition_penalty < 0) throw std::invalid_argument("repetition_penalty must be non-negative");
-    }
+        : beam_size(beam_size),
+          max_length(max_length),
+          length_penalty(length_penalty),
+          eos_penalty(eos_penalty),
+          num_return_sequences(num_return_sequences),
+          temperature(temperature),
+          top_k(top_k),
+          top_p(top_p),
+          repetition_penalty(repetition_penalty) {}
 };
 
-// 候选序列的数据结构
-struct BeamHypothesis {
-    std::vector<int64_t> tokens;  // 生成的token序列
-    float score;                  // 序列的累积分数
-    bool is_done;                // 是否已完成（遇到EOS）
+class BeamSearchDecoder;  // 前向声明
 
-    BeamHypothesis(
-        const std::vector<int64_t>& tokens = {},
-        float score = 0.0f,
-        bool is_done = false)
-        : tokens(tokens)
-        , score(score)
-        , is_done(is_done) {}
-};
-
-// 缓存状态管理
-struct CacheState {
-    std::vector<float> key_cache;     // key投影的缓存
-    std::vector<float> value_cache;   // value投影的缓存
-    int current_length;               // 当前序列长度
-    int hidden_size;                 // 隐藏层大小
-    int num_heads;                   // 注意力头数量
-
-    CacheState(int max_length, int hidden_size, int num_heads)
-        : key_cache(max_length * hidden_size)
-        , value_cache(max_length * hidden_size)
-        , current_length(0)
-        , hidden_size(hidden_size)
-        , num_heads(num_heads) {}
-
-    void update(const std::vector<float>& new_key,
-               const std::vector<float>& new_value) {
-        // 更新缓存
-        std::copy(new_key.begin(), new_key.end(),
-                 key_cache.begin() + current_length * hidden_size);
-        std::copy(new_value.begin(), new_value.end(),
-                 value_cache.begin() + current_length * hidden_size);
-        current_length++;
-    }
-
-    void clear() {
-        std::fill(key_cache.begin(), key_cache.end(), 0.0f);
-        std::fill(value_cache.begin(), value_cache.end(), 0.0f);
-        current_length = 0;
-    }
-};
-
-// Beam Search解码器
-class BeamSearchDecoder {
+class BeamSearchState {
 public:
-    explicit BeamSearchDecoder(const BeamSearchConfig& config);
+    explicit BeamSearchState(const BeamSearchConfig& config)
+        : config_(config), finished_(false) {}
 
-    // 主解码函数
-    std::vector<BeamHypothesis> decode(
-        const std::function<std::vector<float>(
-            const std::vector<int64_t>&,
-            const CacheState&)>& step_fn,
-        int64_t bos_token_id,
-        int64_t eos_token_id,
-        int64_t pad_token_id);
+    void initialize_from_encoder_output(const std::vector<float>& encoder_output) {
+        encoder_output_ = encoder_output;
+        current_tokens_.clear();
+        scores_.clear();
+    }
+
+    bool is_finished() const { return finished_; }
+    
+    const std::vector<int64_t>& get_current_tokens() const { return current_tokens_; }
+    
+    void set_scores(const std::vector<float>& scores) {
+        scores_ = scores;
+    }
+
+    const std::vector<float>& get_scores() const { return scores_; }
+
+    void append_token(int64_t token) {
+        current_tokens_.push_back(token);
+        if (current_tokens_.size() >= config_.max_length) {
+            finished_ = true;
+        }
+    }
+
+    std::vector<int64_t> get_best_sequence() const {
+        return current_tokens_;
+    }
 
 private:
     BeamSearchConfig config_;
-    std::mt19937 rng_;  // 随机数生成器
+    std::vector<float> encoder_output_;
+    std::vector<int64_t> current_tokens_;
+    std::vector<float> scores_;
+    bool finished_;
 
-    // 计算归一化分数
-    float compute_normalized_score(const BeamHypothesis& hyp) const;
+    friend class BeamSearchDecoder;  // 允许 BeamSearchDecoder 访问私有成员
+};
 
-    // 更新候选序列
-    void update_hypotheses(
-        std::vector<BeamHypothesis>& hypotheses,
-        const std::vector<float>& next_scores,
-        const std::vector<int64_t>& next_tokens,
-        int64_t eos_token_id);
+class BeamSearchDecoder {
+public:
+    explicit BeamSearchDecoder(const BeamSearchConfig& config)
+        : config_(config) {}
 
-    // 应用温度和采样
-    std::vector<float> apply_temperature_and_sampling(
-        std::vector<float>& scores,
-        const std::vector<int64_t>& tokens,
-        const std::vector<int64_t>& previous_tokens) const;
+    void update_config(const BeamSearchConfig& config) {
+        config_ = config;
+    }
 
-    // Top-K采样
-    void apply_top_k_sampling(std::vector<float>& scores) const;
+    int64_t generate_next_token(BeamSearchState& state) {
+        // 应用温度缩放
+        std::vector<float> scaled_scores = state.scores_;
+        for (auto& score : scaled_scores) {
+            score /= config_.temperature;
+        }
 
-    // Top-P (nucleus) 采样
-    void apply_top_p_sampling(std::vector<float>& scores) const;
+        // 应用 top_k 采样
+        if (config_.top_k > 0) {
+            apply_top_k(scaled_scores);
+        }
+
+        // 应用 top_p 采样
+        if (config_.top_p < 1.0f) {
+            apply_top_p(scaled_scores);
+        }
+
+        // 应用重复惩罚
+        apply_repetition_penalty(scaled_scores, state.get_current_tokens());
+
+        // 获取最高分数的token
+        auto max_it = std::max_element(scaled_scores.begin(), scaled_scores.end());
+        return static_cast<int64_t>(std::distance(scaled_scores.begin(), max_it));
+    }
+
+private:
+    BeamSearchConfig config_;
+
+    void apply_top_k(std::vector<float>& scores) {
+        std::vector<size_t> indices(scores.size());
+        std::iota(indices.begin(), indices.end(), 0);
+        std::sort(indices.begin(), indices.end(),
+                 [&scores](size_t i1, size_t i2) { return scores[i1] > scores[i2]; });
+
+        std::vector<float> new_scores(scores.size(), -INFINITY);
+        for (size_t i = 0; i < std::min(static_cast<size_t>(config_.top_k), scores.size()); ++i) {
+            new_scores[indices[i]] = scores[indices[i]];
+        }
+        scores = new_scores;
+    }
+
+    void apply_top_p(std::vector<float>& scores) {
+        // 计算softmax
+        float max_score = *std::max_element(scores.begin(), scores.end());
+        std::vector<float> probs;
+        float sum = 0.0f;
+        for (float score : scores) {
+            float prob = std::exp(score - max_score);
+            probs.push_back(prob);
+            sum += prob;
+        }
+        for (float& prob : probs) {
+            prob /= sum;
+        }
+
+        // 按概率排序
+        std::vector<size_t> indices(scores.size());
+        std::iota(indices.begin(), indices.end(), 0);
+        std::sort(indices.begin(), indices.end(),
+                 [&probs](size_t i1, size_t i2) { return probs[i1] > probs[i2]; });
+
+        // 累积概率直到达到top_p
+        float cumsum = 0.0f;
+        std::vector<float> new_scores(scores.size(), -INFINITY);
+        for (size_t idx : indices) {
+            if (cumsum >= config_.top_p) break;
+            new_scores[idx] = scores[idx];
+            cumsum += probs[idx];
+        }
+        scores = new_scores;
+    }
+
+    void apply_repetition_penalty(std::vector<float>& scores, const std::vector<int64_t>& tokens) {
+        for (int64_t token : tokens) {
+            if (token >= 0 && token < static_cast<int64_t>(scores.size())) {
+                scores[token] /= config_.repetition_penalty;
+            }
+        }
+    }
 };
 
 } // namespace nllb 

@@ -276,7 +276,7 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
     try {
         auto start_time = std::chrono::high_resolution_clock::now();
         
-        // 初始化beam search
+        // 初始化beam search状态
         BeamSearchState state(beam_config_);
         state.initialize_from_encoder_output(encoder_output);
         
@@ -288,7 +288,7 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
             
             // 创建输入张量
             std::vector<int64_t> input_shape = {1, static_cast<int64_t>(current_tokens.size())};
-            std::vector<int64_t> input_ids = current_tokens; // 创建可修改的副本
+            std::vector<int64_t> input_ids(current_tokens); // 创建可修改的副本
             
             auto input_tensor = Ort::Value::CreateTensor<int64_t>(
                 memory_info, input_ids.data(), input_ids.size(), input_shape.data(), input_shape.size());
