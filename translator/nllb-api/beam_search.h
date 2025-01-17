@@ -7,39 +7,46 @@
 
 namespace nllb {
 
-struct BeamHypothesis {
-    std::vector<int64_t> tokens;
-    float score;
-    bool is_done;
+struct ModelParams {
+    int beam_size = 5;
+    int max_length = 128;
+    float length_penalty = 1.0f;
+    float temperature = 1.0f;
+    int top_k = 0;
+    float top_p = 0.9f;
+    float repetition_penalty = 1.0f;
+    int num_threads = 4;
+    bool support_low_quality_languages = false;
 };
 
-struct ModelParams;  // Forward declaration
+class BeamHypothesis {
+public:
+    std::vector<int64_t> tokens;
+    float score;
+    bool done;
+
+    BeamHypothesis() : score(0.0f), done(false) {}
+};
 
 class BeamSearchDecoder {
 public:
-    BeamSearchDecoder(int beam_size, float length_penalty, int64_t eos_token_id);
-    
+    BeamSearchDecoder() = default;
+    ~BeamSearchDecoder() = default;
+
     std::vector<BeamHypothesis> decode(
         Ort::Session& decoder_session,
-        Ort::Session& embed_lm_head_session,
+        Ort::Session& embed_session,
         const Ort::MemoryInfo& memory_info,
         const std::vector<float>& encoder_output,
-        const std::vector<int64_t>& encoder_shape,
-        CacheContainer& cache_container,
+        const std::vector<int64_t>& encoder_attention_mask,
+        CacheContainer& cache,
         const ModelParams& params) const;
 
 private:
     std::vector<float> compute_next_token_scores(
-        const std::vector<float>& logits,
-        const std::vector<int64_t>& current_tokens,
-        float temperature,
-        float repetition_penalty,
-        float top_k,
-        float top_p) const;
-
-    int beam_size_;
-    float length_penalty_;
-    int64_t eos_token_id_;
+        const std::vector<int64_t>& prev_tokens,
+        const std::vector<BeamHypothesis>& hypotheses,
+        const ModelParams& params) const;
 };
 
 } // namespace nllb 
