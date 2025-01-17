@@ -2,41 +2,36 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "type": "cppbuild",
-            "label": "C/C++: g++ build active file",
-            "command": "g++",
+            "label": "CMake Configure",
+            "type": "shell",
+            "command": "cmake",
             "args": [
-                "-fdiagnostics-color=always",
-                "-g",
-                "${file}",
-                "-o",
-                "${fileDirname}\\${fileBasenameNoExtension}.exe",
-                "-I", "${workspaceFolder}",
-                "-I", "C:/Users/boringsoft/code/hewenyu/LocalTranslator/vcpkg_installed/x64-windows/include",
-                "-L", "C:/Users/boringsoft/code/hewenyu/LocalTranslator/vcpkg_installed/x64-windows/lib",
-                "-I", "C:/Users/boringsoft/code/hewenyu/LocalTranslator/onnxruntime/onnxruntime-win-x64/include",
-                "-L", "C:/Users/boringsoft/code/hewenyu/LocalTranslator/onnxruntime/onnxruntime-win-x64/lib",
-                "-static",
-                "-lyaml-cpp",
-                "-lbenchmark",
-                "-lonnxruntime",
-                "-lgtest",
-                "-lgtest_main",
-                "-pthread",
-                "-lspdlog",
-                "-lws2_32"
+                "-B",
+                "${workspaceFolder}/build",
+                "-S",
+                "${workspaceFolder}",
+                "-DCMAKE_BUILD_TYPE=Debug",
+                "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/vcpkg/scripts/buildsystems/vcpkg.cmake"
             ],
-            "options": {
-                "cwd": "${fileDirname}"
-            },
-            "problemMatcher": [
-                "$gcc"
+            "problemMatcher": [],
+            "group": "build"
+        },
+        {
+            "label": "CMake Build",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build",
+                "--config",
+                "Debug"
             ],
+            "problemMatcher": "$msCompile",
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
-            "detail": "编译器: g++"
+            "dependsOn": ["CMake Configure"]
         }
     ]
 }
