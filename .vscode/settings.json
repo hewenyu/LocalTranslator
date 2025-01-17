@@ -1,0 +1,17 @@
+{
+    "files.associations": {
+        "xstring": "cpp",
+        "ostream": "cpp"
+    },
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/**",
+        "C:/Users/boringsoft/code/hewenyu/LocalTranslator/vcpkg_installed/x64-windows/include", 
+        "C:/Users/boringsoft/code/hewenyu/LocalTranslator/onnxruntime/onnxruntime-win-x64/include"
+    ],
+    "C_Cpp.default.defines": [
+        "YAML_CPP_STATIC_DEFINE"
+    ],
+    "cmake.configureOnOpen": true,
+    "cmake.generator": "Visual Studio 17 2022",
+    "cmake.buildDirectory": "${workspaceFolder}/build"
+}
