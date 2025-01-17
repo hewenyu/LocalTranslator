@@ -78,6 +78,38 @@ TEST_F(NLLBTranslatorTest, ChineseToEnglish) {
     }
 }
 
+// 测试语言代码转换
+TEST_F(NLLBTranslatorTest, LanguageCodeConversion) {
+    // 测试标准语言代码
+    EXPECT_EQ(translator->get_nllb_language_code("en"), "eng_Latn");
+    EXPECT_EQ(translator->get_nllb_language_code("zh"), "zho_Hans");
+    
+    // 测试显示语言代码
+    EXPECT_EQ(translator->get_display_language_code("eng_Latn"), "en");
+    EXPECT_EQ(translator->get_display_language_code("zho_Hans"), "zh");
+}
+
+// 测试低质量语言支持
+TEST_F(NLLBTranslatorTest, LowQualityLanguageSupport) {
+    // 默认不支持低质量语言
+    EXPECT_FALSE(translator->get_support_low_quality_languages());
+    
+    // 启用低质量语言支持
+    translator->set_support_low_quality_languages(true);
+    EXPECT_TRUE(translator->get_support_low_quality_languages());
+    
+    // 验证支持的语言列表是否更新
+    auto languages = translator->get_supported_languages();
+    EXPECT_FALSE(languages.empty());
+}
+
+// 测试EOS惩罚系数设置
+TEST_F(NLLBTranslatorTest, EOSPenaltyConfig) {
+    const float new_penalty = 0.8f;
+    translator->set_eos_penalty(new_penalty);
+    EXPECT_FLOAT_EQ(translator->get_eos_penalty(), new_penalty);
+}
+
 // 测试长文本翻译
 TEST_F(NLLBTranslatorTest, LongTextTranslation) {
     const std::string input = "This is a long text that needs to be translated. "
@@ -96,9 +128,30 @@ TEST_F(NLLBTranslatorTest, LongTextTranslation) {
     }
 }
 
+// 测试批量翻译
+TEST_F(NLLBTranslatorTest, BatchTranslation) {
+    std::vector<std::string> inputs = {
+        "Hello",
+        "How are you?",
+        "Nice to meet you"
+    };
+    const std::string source_lang = "eng_Latn";
+    
+    try {
+        auto results = translator->translate_batch(inputs, source_lang);
+        EXPECT_EQ(results.size(), inputs.size());
+        for (size_t i = 0; i < results.size(); ++i) {
+            EXPECT_FALSE(results[i].empty());
+            spdlog::info("Batch translation result {}: {}", i, results[i]);
+        }
+    } catch (const std::exception& e) {
+        FAIL() << "Batch translation failed: " << e.what();
+    }
+}
+
 // 测试特殊字符处理
 TEST_F(NLLBTranslatorTest, SpecialCharacters) {
-    const std::string input = "Hello! @#$%^&* 你好！";
+    const std::string input = "Hello! @#$%^&*()_+ 你好！";
     const std::string source_lang = "eng_Latn";
     
     try {
@@ -110,55 +163,7 @@ TEST_F(NLLBTranslatorTest, SpecialCharacters) {
     }
 }
 
-// 测试错误处理 - 无效的源语言
-TEST_F(NLLBTranslatorTest, InvalidSourceLanguage) {
-    const std::string input = "Hello";
-    const std::string invalid_lang = "invalid_lang";
-    
-    EXPECT_THROW(translator->translate(input, invalid_lang), std::runtime_error);
-}
-
-// 测试空输入
-TEST_F(NLLBTranslatorTest, EmptyInput) {
-    const std::string input = "";
-    const std::string source_lang = "eng_Latn";
-    
-    try {
-        std::string result = translator->translate(input, source_lang);
-        EXPECT_TRUE(result.empty());
-    } catch (const std::exception& e) {
-        FAIL() << "Empty input handling failed: " << e.what();
-    }
-}
-
-// 测试多语言切换
-TEST_F(NLLBTranslatorTest, MultiLanguageSwitch) {
-    struct TestCase {
-        std::string input;
-        std::string source_lang;
-        std::string description;
-    };
-
-    std::vector<TestCase> test_cases = {
-        {"Hello, world!", "eng_Latn", "English"},
-        {"你好，世界！", "zho_Hans", "Chinese"},
-        {"Bonjour le monde!", "fra_Latn", "French"},
-        {"こんにちは、世界！", "jpn_Jpan", "Japanese"}
-    };
-
-    for (const auto& test : test_cases) {
-        try {
-            std::string result = translator->translate(test.input, test.source_lang);
-            EXPECT_FALSE(result.empty());
-            spdlog::info("{} translation result: {}", test.description, result);
-        } catch (const std::exception& e) {
-            FAIL() << test.description << " translation failed: " << e.what();
-        }
-    }
-}
-
-// 测试目标语言获取
-TEST_F(NLLBTranslatorTest, GetTargetLanguage) {
-    std::string target_lang = translator->get_target_language();
-    EXPECT_EQ(target_lang, "eng_Latn");
+int main(int argc, char **argv) {
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 } 

@@ -35,6 +35,9 @@ ModelConfig ModelConfig::load_from_yaml(const std::string& config_path) {
         model_config.max_position_embeddings = config["max_position_embeddings"].as<int>();
         model_config.encoder_layers = config["encoder_layers"].as<int>();
         model_config.decoder_layers = config["decoder_layers"].as<int>();
+        model_config.support_low_quality_languages = config["support_low_quality_languages"].as<bool>();
+        model_config.eos_penalty = config["eos_penalty"].as<float>();
+        model_config.max_batch_size = config["max_batch_size"].as<int>();
         return model_config;
     } catch (const std::exception& e) {
         throw std::runtime_error("Failed to load model config: " + std::string(e.what()));
@@ -100,14 +103,15 @@ NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config)
 NLLBTranslator::~NLLBTranslator() = default;
 
 void NLLBTranslator::initialize_language_codes() {
-    spdlog::debug("Loading language codes...");
-    std::string lang_file = model_dir_ + "/nllb_supported_languages.xml";
     try {
+        // 加载语言代码映射文件
         tinyxml2::XMLDocument doc;
-        if (doc.LoadFile(lang_file.c_str()) != tinyxml2::XML_SUCCESS) {
-            throw std::runtime_error("Failed to load XML file: " + lang_file);
+        std::string xml_path = model_dir_ + "/nllb_supported_languages.xml";
+        if (doc.LoadFile(xml_path.c_str()) != tinyxml2::XML_SUCCESS) {
+            throw std::runtime_error("Failed to load language codes XML file");
         }
 
+        // 解析XML文件
         auto root = doc.FirstChildElement("languages");
         if (!root) {
             throw std::runtime_error("Invalid XML format: missing root element");
@@ -116,18 +120,32 @@ void NLLBTranslator::initialize_language_codes() {
         for (auto lang = root->FirstChildElement("language"); lang; lang = lang->NextSiblingElement("language")) {
             auto code = lang->FirstChildElement("code");
             auto nllb_code = lang->FirstChildElement("code_NLLB");
+            
             if (code && nllb_code) {
-                std::string code_str = code->GetText();
+                std::string display_code = code->GetText();
                 std::string nllb_code_str = nllb_code->GetText();
-                nllb_language_codes_[code_str] = nllb_code_str;
-                supported_languages_.push_back(code_str);
-                spdlog::debug("Added language mapping: {} -> {}", code_str, nllb_code_str);
+                
+                nllb_language_codes_[display_code] = nllb_code_str;
+                display_language_codes_[nllb_code_str] = display_code;
+                
+                if (!model_config_.support_low_quality_languages) {
+                    supported_languages_.push_back(display_code);
+                } else {
+                    // 检查是否为低质量语言
+                    auto quality = lang->FirstChildElement("quality");
+                    if (quality && std::string(quality->GetText()) == "low") {
+                        low_quality_languages_.push_back(display_code);
+                    } else {
+                        supported_languages_.push_back(display_code);
+                    }
+                }
             }
         }
-        spdlog::info("Loaded {} language codes", nllb_language_codes_.size());
+        
+        spdlog::info("Loaded {} supported languages and {} low quality languages", 
+                    supported_languages_.size(), low_quality_languages_.size());
     } catch (const std::exception& e) {
-        spdlog::error("Failed to load language codes: {}", e.what());
-        throw std::runtime_error("Failed to load language codes: " + std::string(e.what()));
+        throw std::runtime_error("Failed to initialize language codes: " + std::string(e.what()));
     }
 }
 
@@ -330,13 +348,45 @@ std::string NLLBTranslator::translate(const std::string& text, const std::string
 }
 
 std::string NLLBTranslator::get_nllb_language_code(const std::string& lang_code) const {
-    auto normalized_code = normalize_language_code(lang_code);
-    auto it = nllb_language_codes_.find(normalized_code);
-    if (it == nllb_language_codes_.end()) {
-        spdlog::error("Unsupported language code: {}", lang_code);
-        throw std::runtime_error("Unsupported language code: " + lang_code);
+    auto it = nllb_language_codes_.find(lang_code);
+    if (it != nllb_language_codes_.end()) {
+        return it->second;
     }
-    return it->second;
+    return lang_code; // 如果找不到映射，返回原始代码
+}
+
+std::string NLLBTranslator::get_display_language_code(const std::string& nllb_code) const {
+    auto it = display_language_codes_.find(nllb_code);
+    if (it != display_language_codes_.end()) {
+        return it->second;
+    }
+    return nllb_code; // 如果找不到映射，返回原始代码
+}
+
+void NLLBTranslator::set_support_low_quality_languages(bool support) {
+    if (model_config_.support_low_quality_languages != support) {
+        model_config_.support_low_quality_languages = support;
+        // 重新加载语言支持
+        supported_languages_.clear();
+        low_quality_languages_.clear();
+        initialize_language_codes();
+    }
+}
+
+bool NLLBTranslator::get_support_low_quality_languages() const {
+    return model_config_.support_low_quality_languages;
+}
+
+void NLLBTranslator::set_eos_penalty(float penalty) {
+    model_config_.eos_penalty = penalty;
+    if (beam_search_decoder_) {
+        beam_config_.eos_penalty = penalty;
+        beam_search_decoder_->update_config(beam_config_);
+    }
+}
+
+float NLLBTranslator::get_eos_penalty() const {
+    return model_config_.eos_penalty;
 }
 
 std::string NLLBTranslator::get_target_language() const {

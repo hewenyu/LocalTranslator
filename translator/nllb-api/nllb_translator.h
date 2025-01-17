@@ -22,11 +22,17 @@ struct ModelConfig {
     int max_position_embeddings;
     int encoder_layers;
     int decoder_layers;
+    bool support_low_quality_languages;
+    float eos_penalty;
+    int max_batch_size;
 
     ModelConfig(int hidden_size = 1024, int num_heads = 16, int num_layers = 24)
         : hidden_size(hidden_size), num_heads(num_heads), num_layers(num_layers),
           vocab_size(256200), max_position_embeddings(1024),
-          encoder_layers(24), decoder_layers(24) {}
+          encoder_layers(24), decoder_layers(24),
+          support_low_quality_languages(false),
+          eos_penalty(0.9f),
+          max_batch_size(8) {}
 
     static ModelConfig load_from_yaml(const std::string& config_path);
 };
@@ -49,6 +55,16 @@ public:
     // 批量翻译
     std::vector<std::string> translate_batch(const std::vector<std::string>& texts, 
                                            const std::string& source_lang) const;
+
+    // 新增：语言代码转换
+    std::string get_nllb_language_code(const std::string& lang_code) const;
+    std::string get_display_language_code(const std::string& nllb_code) const;
+    
+    // 新增：配置管理
+    void set_support_low_quality_languages(bool support);
+    bool get_support_low_quality_languages() const;
+    void set_eos_penalty(float penalty);
+    float get_eos_penalty() const;
 
 private:
     // ONNX Runtime sessions
@@ -73,7 +89,9 @@ private:
     
     // Language support
     std::map<std::string, std::string> nllb_language_codes_;
+    std::map<std::string, std::string> display_language_codes_;
     std::vector<std::string> supported_languages_;
+    std::vector<std::string> low_quality_languages_;
     
     // State management
     bool is_initialized_;
@@ -87,7 +105,6 @@ private:
     void load_supported_languages();
     
     // Helper methods
-    std::string get_nllb_language_code(const std::string& lang_code) const;
     std::string normalize_language_code(const std::string& lang_code) const;
     
     // Model inference methods
