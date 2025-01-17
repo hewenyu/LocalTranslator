@@ -42,14 +42,16 @@ ModelConfig ModelConfig::load_from_yaml(const std::string& config_path) {
 }
 
 NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config) 
-    : ort_env_(ORT_LOGGING_LEVEL_WARNING, "nllb_translator") {
-    model_dir_ = config.nllb.model_dir;
-    target_lang_ = config.nllb.target_lang;
-    params_ = config.nllb.params;
-    
-    spdlog::info("Initializing NLLB translator with model dir: {}", model_dir_);
-    
+    : ort_env_(ORT_LOGGING_LEVEL_WARNING, "nllb_translator"),
+      is_initialized_(false),
+      is_translating_(false) {
     try {
+        model_dir_ = config.nllb.model_dir;
+        target_lang_ = config.nllb.target_lang;
+        params_ = config.nllb.params;
+        
+        spdlog::info("Initializing NLLB translator with model dir: {}", model_dir_);
+        
         // 加载模型配置
         std::string config_path = model_dir_ + "/model_config.yaml";
         model_config_ = ModelConfig::load_from_yaml(config_path);
@@ -59,11 +61,17 @@ NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config)
         // 初始化组件
         initialize_language_codes();
         load_models();
+        load_supported_languages();
         
         // 初始化tokenizer
         std::string vocab_path = model_dir_ + "/" + config.nllb.model_files.tokenizer_vocab;
         tokenizer_ = std::make_unique<Tokenizer>(vocab_path);
         spdlog::info("Initialized tokenizer with vocab: {}", vocab_path);
+
+        // 初始化语言检测器
+        if (!initialize_language_detector()) {
+            spdlog::warn("Language detector initialization failed, will use user-provided language codes");
+        }
 
         // 初始化beam search配置
         beam_config_ = BeamSearchConfig(
@@ -72,15 +80,16 @@ NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config)
             params_.length_penalty,
             0.9f,  // Default EOS penalty
             1,     // Default num return sequences
-            1.0f,  // Default temperature
-            0,     // Default top_k (disabled)
-            0.9f,  // Default top_p
-            0.9f   // Default repetition penalty
+            params_.temperature,
+            params_.top_k,
+            params_.top_p,
+            params_.repetition_penalty
         );
         
         // 创建beam search解码器
         beam_search_decoder_ = std::make_unique<BeamSearchDecoder>(beam_config_);
         
+        is_initialized_ = true;
         spdlog::info("NLLB translator initialization completed successfully");
     } catch (const std::exception& e) {
         spdlog::error("Failed to initialize NLLB translator: {}", e.what());
@@ -473,8 +482,28 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
 }
 
 std::string NLLBTranslator::translate(const std::string& text, const std::string& source_lang) const {
-    spdlog::info("Starting translation from {} to {}", source_lang, target_lang_);
+    if (!is_initialized_) {
+        throw std::runtime_error("Translator not initialized");
+    }
+
+    if (text.empty()) {
+        return "";
+    }
+
+    // 检查源语言是否需要翻译
+    if (!needs_translation(source_lang)) {
+        return text;
+    }
+
+    // 获取翻译锁
+    std::lock_guard<std::mutex> lock(translation_mutex_);
+    if (is_translating_.exchange(true)) {
+        throw std::runtime_error("Translation already in progress");
+    }
+
     try {
+        spdlog::info("Starting translation from {} to {}", source_lang, target_lang_);
+        
         // 获取 NLLB 语言代码
         std::string src_lang_nllb = get_nllb_language_code(source_lang);
         std::string tgt_lang_nllb = get_nllb_language_code(target_lang_);
@@ -489,8 +518,12 @@ std::string NLLBTranslator::translate(const std::string& text, const std::string
         auto output_ids = run_decoder(encoder_output, tgt_lang_nllb);
         
         // 将输出转换为文本
-        return tokenizer_->decode(output_ids);
+        std::string result = tokenizer_->decode(output_ids);
+        
+        is_translating_ = false;
+        return result;
     } catch (const std::exception& e) {
+        is_translating_ = false;
         spdlog::error("Translation failed: {}", e.what());
         throw std::runtime_error("Translation failed: " + std::string(e.what()));
     }

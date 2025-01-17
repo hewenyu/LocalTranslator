@@ -31,4 +31,12 @@ target_link_libraries(translator
     absl::flat_hash_set
     ${ONNXRUNTIME_LIB}
     sentencepiece-static
+    Threads::Threads
+)
+
+# 添加编译选项
+target_compile_features(translator PRIVATE cxx_std_17)
+target_compile_options(translator PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/W4 /MP>
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
 ) 
