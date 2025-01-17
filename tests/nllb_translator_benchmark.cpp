@@ -1,168 +1,111 @@
 #include <benchmark/benchmark.h>
-#include <filesystem>
-#include <fstream>
 #include "translator/nllb-api/nllb_translator.h"
+#include "common/common.h"
+#include <memory>
+#include <string>
+#include <vector>
 
-namespace {
-namespace fs = std::filesystem;
-
-// Benchmark fixture with fixed settings
+// 性能测试固定设置
 class NLLBTranslatorBenchmark : public benchmark::Fixture {
-public:
-    void SetUp(const benchmark::State& state) {
-        // Setup test configuration
-        config.nllb.model_dir = "../../../models";
-        config.nllb.target_lang = "zh";
-        config.nllb.params.beam_size = state.range(0);
-        config.nllb.params.max_length = 128;
+protected:
+    void SetUp(const benchmark::State& state) override {
+        // 初始化翻译器配置
+        common::TranslatorConfig config;
+        config.type = "NLLB";
+        config.nllb.model_dir = "C:/Users/boringsoft/code/hewenyu/LocalTranslator/models";
+        config.nllb.target_lang = "ZH";
+        config.nllb.model_files.encoder = "NLLB_encoder.onnx";
+        config.nllb.model_files.decoder = "NLLB_decoder.onnx";
+        config.nllb.model_files.embed_lm_head = "NLLB_embed_and_lm_head.onnx";
+        config.nllb.model_files.cache_initializer = "NLLB_cache_initializer.onnx";
+        config.nllb.model_files.tokenizer_vocab = "sentencepiece_bpe.model";
+        config.nllb.model_files.language_config = "nllb_languages.yaml";
+        config.nllb.params.beam_size = 5;
+        config.nllb.params.num_threads = 4;
         config.nllb.params.length_penalty = 1.0f;
-        config.nllb.params.temperature = state.range(2) / 10.0f;
-        config.nllb.params.top_k = state.range(3);
+        config.nllb.params.temperature = 1.0f;
+        config.nllb.params.top_k = 0;
         config.nllb.params.top_p = 0.9f;
         config.nllb.params.repetition_penalty = 0.9f;
-        config.nllb.params.num_threads = state.range(1);
-        config.nllb.params.use_cache = true;
-        config.nllb.model_files.tokenizer_vocab = "sentencepiece_bpe.model";
         
+        // 创建翻译器实例
         translator = std::make_unique<nllb::NLLBTranslator>(config);
     }
 
-    void TearDown(const benchmark::State&) {
+    void TearDown(const benchmark::State& state) override {
         translator.reset();
     }
 
-protected:
-    common::TranslatorConfig config;
     std::unique_ptr<nllb::NLLBTranslator> translator;
 };
 
-// Benchmark different beam sizes
-BENCHMARK_DEFINE_F(NLLBTranslatorBenchmark, BeamSizeTest)(benchmark::State& state) {
-    const std::string text = "Hello, world! This is a test sentence for benchmarking.";
+// 基准测试：不同的 beam size
+BENCHMARK_F(NLLBTranslatorBenchmark, BeamSizeTest)(benchmark::State& state) {
+    const std::string text = "This is a test sentence for benchmarking.";
+    translator->set_beam_size(state.range(0));
+
     for (auto _ : state) {
-        std::string result = translator->translate(text, "en");
-        if (translator->get_last_error() != nllb::TranslatorError::OK) {
-            state.SkipWithError(translator->get_error_message().c_str());
-            break;
-        }
+        translator->translate(text, "en");
     }
-    
-    // Set custom counters
-    state.counters["beam_size"] = state.range(0);
-    state.counters["threads"] = state.range(1);
-    state.counters["temperature"] = state.range(2) / 10.0f;
-    state.counters["top_k"] = state.range(3);
-    state.counters["text_length"] = text.length();
 }
 
-// Benchmark different input lengths
-BENCHMARK_DEFINE_F(NLLBTranslatorBenchmark, InputLengthTest)(benchmark::State& state) {
-    // Generate input text of specified length
-    std::string text(state.range(4), 'a');
+// 基准测试：不同的输入长度
+BENCHMARK_F(NLLBTranslatorBenchmark, InputLengthTest)(benchmark::State& state) {
+    std::string text(state.range(0), 'a');
     for (auto _ : state) {
-        std::string result = translator->translate(text, "en");
-        if (translator->get_last_error() != nllb::TranslatorError::OK) {
-            state.SkipWithError(translator->get_error_message().c_str());
-            break;
-        }
+        translator->translate(text, "en");
     }
-    
-    // Set custom counters
-    state.counters["beam_size"] = state.range(0);
-    state.counters["threads"] = state.range(1);
-    state.counters["temperature"] = state.range(2) / 10.0f;
-    state.counters["top_k"] = state.range(3);
-    state.counters["text_length"] = state.range(4);
 }
 
-// Benchmark different thread counts
-BENCHMARK_DEFINE_F(NLLBTranslatorBenchmark, ThreadCountTest)(benchmark::State& state) {
-    const std::string text = "Hello, world! This is a test sentence for benchmarking.";
+// 基准测试：不同的线程数
+BENCHMARK_F(NLLBTranslatorBenchmark, ThreadCountTest)(benchmark::State& state) {
+    const std::string text = "This is a test sentence for benchmarking.";
+    translator->set_num_threads(state.range(0));
+
     for (auto _ : state) {
-        std::string result = translator->translate(text, "en");
-        if (translator->get_last_error() != nllb::TranslatorError::OK) {
-            state.SkipWithError(translator->get_error_message().c_str());
-            break;
-        }
+        translator->translate(text, "en");
     }
-    
-    // Set custom counters
-    state.counters["beam_size"] = state.range(0);
-    state.counters["threads"] = state.range(1);
-    state.counters["temperature"] = state.range(2) / 10.0f;
-    state.counters["top_k"] = state.range(3);
-    state.counters["text_length"] = text.length();
 }
 
-// Benchmark different temperature values
-BENCHMARK_DEFINE_F(NLLBTranslatorBenchmark, TemperatureTest)(benchmark::State& state) {
-    const std::string text = "Hello, world! This is a test sentence for benchmarking.";
+// 基准测试：不同的温度值
+BENCHMARK_F(NLLBTranslatorBenchmark, TemperatureTest)(benchmark::State& state) {
+    const std::string text = "This is a test sentence for benchmarking.";
+    translator->set_temperature(state.range(0) / 10.0f);
+
     for (auto _ : state) {
-        std::string result = translator->translate(text, "en");
-        if (translator->get_last_error() != nllb::TranslatorError::OK) {
-            state.SkipWithError(translator->get_error_message().c_str());
-            break;
-        }
+        translator->translate(text, "en");
     }
-    
-    // Set custom counters
-    state.counters["beam_size"] = state.range(0);
-    state.counters["threads"] = state.range(1);
-    state.counters["temperature"] = state.range(2) / 10.0f;
-    state.counters["top_k"] = state.range(3);
-    state.counters["text_length"] = text.length();
 }
 
-// Benchmark different top-k values
-BENCHMARK_DEFINE_F(NLLBTranslatorBenchmark, TopKTest)(benchmark::State& state) {
-    const std::string text = "Hello, world! This is a test sentence for benchmarking.";
+// 基准测试：不同的 top_k 值
+BENCHMARK_F(NLLBTranslatorBenchmark, TopKTest)(benchmark::State& state) {
+    const std::string text = "This is a test sentence for benchmarking.";
+    translator->set_top_k(state.range(0));
+
     for (auto _ : state) {
-        std::string result = translator->translate(text, "en");
-        if (translator->get_last_error() != nllb::TranslatorError::OK) {
-            state.SkipWithError(translator->get_error_message().c_str());
-            break;
-        }
+        translator->translate(text, "en");
     }
-    
-    // Set custom counters
-    state.counters["beam_size"] = state.range(0);
-    state.counters["threads"] = state.range(1);
-    state.counters["temperature"] = state.range(2) / 10.0f;
-    state.counters["top_k"] = state.range(3);
-    state.counters["text_length"] = text.length();
 }
 
-// Register benchmarks with different parameter combinations
-BENCHMARK_REGISTER_F(NLLBTranslatorBenchmark, BeamSizeTest)
-    ->Args({1, 4, 10, 0})   // beam_size=1, threads=4, temp=1.0, top_k=0
-    ->Args({3, 4, 10, 0})   // beam_size=3, threads=4, temp=1.0, top_k=0
-    ->Args({5, 4, 10, 0})   // beam_size=5, threads=4, temp=1.0, top_k=0
-    ->Unit(benchmark::kMillisecond);
+// 基准测试：批处理性能
+BENCHMARK_F(NLLBTranslatorBenchmark, BatchProcessingTest)(benchmark::State& state) {
+    std::vector<std::string> texts;
+    const int batch_size = state.range(0);
+    for (int i = 0; i < batch_size; ++i) {
+        texts.push_back("This is test sentence " + std::to_string(i) + " for batch processing.");
+    }
 
-BENCHMARK_REGISTER_F(NLLBTranslatorBenchmark, InputLengthTest)
-    ->Args({5, 4, 10, 0, 32})    // beam_size=5, threads=4, temp=1.0, top_k=0, length=32
-    ->Args({5, 4, 10, 0, 64})    // beam_size=5, threads=4, temp=1.0, top_k=0, length=64
-    ->Args({5, 4, 10, 0, 128})   // beam_size=5, threads=4, temp=1.0, top_k=0, length=128
-    ->Unit(benchmark::kMillisecond);
+    for (auto _ : state) {
+        translator->translate_batch(texts, "en");
+    }
+}
 
-BENCHMARK_REGISTER_F(NLLBTranslatorBenchmark, ThreadCountTest)
-    ->Args({5, 1, 10, 0})   // beam_size=5, threads=1, temp=1.0, top_k=0
-    ->Args({5, 2, 10, 0})   // beam_size=5, threads=2, temp=1.0, top_k=0
-    ->Args({5, 4, 10, 0})   // beam_size=5, threads=4, temp=1.0, top_k=0
-    ->Unit(benchmark::kMillisecond);
-
-BENCHMARK_REGISTER_F(NLLBTranslatorBenchmark, TemperatureTest)
-    ->Args({5, 4, 5, 0})    // beam_size=5, threads=4, temp=0.5, top_k=0
-    ->Args({5, 4, 10, 0})   // beam_size=5, threads=4, temp=1.0, top_k=0
-    ->Args({5, 4, 15, 0})   // beam_size=5, threads=4, temp=1.5, top_k=0
-    ->Unit(benchmark::kMillisecond);
-
-BENCHMARK_REGISTER_F(NLLBTranslatorBenchmark, TopKTest)
-    ->Args({5, 4, 10, 0})   // beam_size=5, threads=4, temp=1.0, top_k=0
-    ->Args({5, 4, 10, 5})   // beam_size=5, threads=4, temp=1.0, top_k=5
-    ->Args({5, 4, 10, 10})  // beam_size=5, threads=4, temp=1.0, top_k=10
-    ->Unit(benchmark::kMillisecond);
-
-} // namespace
+// 注册基准测试
+BENCHMARK_REGISTER_F(NLLBTranslatorBenchmark, BeamSizeTest)->Range(1, 8);
+BENCHMARK_REGISTER_F(NLLBTranslatorBenchmark, InputLengthTest)->Range(8, 512);
+BENCHMARK_REGISTER_F(NLLBTranslatorBenchmark, ThreadCountTest)->Range(1, 8);
+BENCHMARK_REGISTER_F(NLLBTranslatorBenchmark, TemperatureTest)->Range(5, 20);
+BENCHMARK_REGISTER_F(NLLBTranslatorBenchmark, TopKTest)->Range(0, 100);
+BENCHMARK_REGISTER_F(NLLBTranslatorBenchmark, BatchProcessingTest)->Range(1, 16);
 
 BENCHMARK_MAIN(); 

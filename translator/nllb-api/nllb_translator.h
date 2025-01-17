@@ -9,6 +9,8 @@
 #include "translator/translator.h"
 #include "translator/nllb-api/tokenizer.h"
 #include "translator/nllb-api/beam_search.h"
+#include "translator/nllb-api/cache_container.h"
+#include "translator/nllb-api/tensor_utils.h"
 #include "translator/nllb-api/language_detector.h"
 #include <onnxruntime_cxx_api.h>
 
@@ -22,7 +24,10 @@ enum class TranslatorError {
     ERROR_ENCODE = -3,
     ERROR_DECODE = -4,
     ERROR_MEMORY = -5,
-    ERROR_INVALID_PARAM = -6
+    ERROR_INVALID_PARAM = -6,
+    ERROR_CACHE_INIT = -7,
+    ERROR_BEAM_SEARCH = -8,
+    ERROR_BATCH_PROCESSING = -9
 };
 
 struct ModelConfig {
@@ -66,16 +71,17 @@ public:
     std::string translate(const std::string& text, const std::string& source_lang) const override;
     std::string get_target_language() const override;
 
-    // Language detection and management
+    // Batch translation with optimizations
+    std::vector<std::string> translate_batch(
+        const std::vector<std::string>& texts,
+        const std::string& source_lang) const;
+
+    // Language support
     std::string detect_language(const std::string& text) const;
     bool needs_translation(const std::string& source_lang) const;
     std::vector<std::string> get_supported_languages() const;
     bool is_language_supported(const std::string& lang_code) const;
     
-    // Batch translation
-    std::vector<std::string> translate_batch(const std::vector<std::string>& texts, 
-                                           const std::string& source_lang) const;
-
     // Language code conversion
     std::string get_nllb_language_code(const std::string& lang_code) const;
     std::string get_display_language_code(const std::string& nllb_code) const;
@@ -85,8 +91,6 @@ public:
     bool get_support_low_quality_languages() const;
     void set_eos_penalty(float penalty);
     float get_eos_penalty() const;
-
-    // New configuration methods
     void set_beam_size(int size);
     void set_max_length(int length);
     void set_length_penalty(float penalty);
@@ -94,31 +98,33 @@ public:
     void set_top_k(float k);
     void set_top_p(float p);
     void set_repetition_penalty(float penalty);
+    void set_num_threads(int threads);
 
     // Error handling
     TranslatorError get_last_error() const;
     std::string get_error_message() const;
 
 private:
-    // ONNX Runtime sessions
+    // ONNX Runtime environment
     Ort::Env ort_env_;
+    Ort::MemoryInfo memory_info_{nullptr};
     std::unique_ptr<Ort::Session> encoder_session_;
     std::unique_ptr<Ort::Session> decoder_session_;
     std::unique_ptr<Ort::Session> embed_lm_head_session_;
     std::unique_ptr<Ort::Session> cache_init_session_;
     std::unique_ptr<Ort::Session> embed_session_;
 
-    // Tokenizer and language detector
+    // Core components
     std::unique_ptr<Tokenizer> tokenizer_;
     std::unique_ptr<LanguageDetector> language_detector_;
+    std::unique_ptr<BeamSearchDecoder> beam_search_decoder_;
+    mutable std::unique_ptr<CacheContainer> cache_container_;
 
     // Configuration
     std::string model_dir_;
     std::string target_lang_;
     common::NLLBConfig::Parameters params_;
     ModelConfig model_config_;
-    BeamSearchConfig beam_config_;
-    std::unique_ptr<BeamSearchDecoder> beam_search_decoder_;
     
     // Language support
     std::map<std::string, std::string> nllb_language_codes_;
@@ -148,6 +154,13 @@ private:
     std::vector<float> run_embedding(const std::vector<int64_t>& input_ids) const;
     std::vector<int64_t> run_decoder(const std::vector<float>& encoder_output,
                                    const std::string& target_lang) const;
+                                   
+    // Optimized batch processing methods
+    std::vector<float> run_encoder_batch(
+        const std::vector<Tokenizer::TokenizerOutput>& batch_tokens) const;
+    std::vector<std::vector<int64_t>> run_decoder_batch(
+        const std::vector<float>& batch_encoder_output,
+        const std::string& target_lang) const;
 };
 
 } // namespace nllb 
