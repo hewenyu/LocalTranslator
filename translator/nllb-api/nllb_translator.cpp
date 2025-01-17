@@ -559,4 +559,76 @@ std::vector<float> NLLBTranslator::run_embedding(const std::vector<int64_t>& inp
     }
 }
 
+bool NLLBTranslator::initialize_language_detector() {
+    try {
+        std::string model_path = model_dir_ + "/language_detector.onnx";
+        language_detector_ = std::make_unique<LanguageDetector>(model_path);
+        return true;
+    } catch (const std::exception& e) {
+        spdlog::error("Failed to initialize language detector: {}", e.what());
+        return false;
+    }
+}
+
+void NLLBTranslator::load_supported_languages() {
+    supported_languages_.clear();
+    for (const auto& pair : nllb_language_codes_) {
+        supported_languages_.push_back(pair.first);
+    }
+}
+
+std::string NLLBTranslator::normalize_language_code(const std::string& lang_code) const {
+    // 转换为小写
+    std::string normalized = lang_code;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), ::tolower);
+    
+    // 移除区域代码
+    size_t dash_pos = normalized.find('-');
+    if (dash_pos != std::string::npos) {
+        normalized = normalized.substr(0, dash_pos);
+    }
+    
+    return normalized;
+}
+
+std::string NLLBTranslator::detect_language(const std::string& text) const {
+    if (!language_detector_) {
+        throw std::runtime_error("Language detector not initialized");
+    }
+    return language_detector_->detect_language(text);
+}
+
+bool NLLBTranslator::needs_translation(const std::string& source_lang) const {
+    return normalize_language_code(source_lang) != normalize_language_code(target_lang_);
+}
+
+std::vector<std::string> NLLBTranslator::get_supported_languages() const {
+    return supported_languages_;
+}
+
+bool NLLBTranslator::is_language_supported(const std::string& lang_code) const {
+    std::string normalized = normalize_language_code(lang_code);
+    return std::find(supported_languages_.begin(), supported_languages_.end(), normalized) 
+           != supported_languages_.end();
+}
+
+std::vector<std::string> NLLBTranslator::translate_batch(
+    const std::vector<std::string>& texts, const std::string& source_lang) const {
+    std::vector<std::string> results;
+    results.reserve(texts.size());
+    
+    std::lock_guard<std::mutex> lock(translation_mutex_);
+    
+    for (const auto& text : texts) {
+        try {
+            results.push_back(translate(text, source_lang));
+        } catch (const std::exception& e) {
+            spdlog::error("Failed to translate text: {}", e.what());
+            results.push_back(text);  // 失败时返回原文
+        }
+    }
+    
+    return results;
+}
+
 } // namespace nllb 

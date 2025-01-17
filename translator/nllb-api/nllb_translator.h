@@ -7,6 +7,7 @@
 #include "translator/nllb-api/tokenizer.h"
 #include "translator/nllb-api/beam_search.h"
 #include <onnxruntime_cxx_api.h>
+#include <mutex>
 
 namespace nllb {
 
@@ -34,6 +35,14 @@ public:
 
     std::string translate(const std::string& text, const std::string& source_lang) const override;
     std::string get_target_language() const override;
+
+    std::string detect_language(const std::string& text) const;
+    bool needs_translation(const std::string& source_lang) const;
+    std::vector<std::string> get_supported_languages() const;
+    bool is_language_supported(const std::string& lang_code) const;
+    
+    std::vector<std::string> translate_batch(const std::vector<std::string>& texts, 
+                                           const std::string& source_lang) const;
 
 private:
     // ONNX Runtime environment and sessions
@@ -68,6 +77,15 @@ private:
     std::vector<float> run_embedding(const std::vector<int64_t>& input_ids) const;
     std::vector<int64_t> run_decoder(const std::vector<float>& encoder_output,
                                    const std::string& target_lang) const;
+
+    bool initialize_language_detector();
+    void load_supported_languages();
+    std::string normalize_language_code(const std::string& lang_code) const;
+    
+    std::unique_ptr<LanguageDetector> language_detector_;
+    std::vector<std::string> supported_languages_;
+    bool is_initialized_;
+    mutable std::mutex translation_mutex_;
 };
 
 } // namespace nllb 
