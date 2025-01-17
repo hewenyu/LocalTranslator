@@ -1,3 +1,4 @@
+#include <onnxruntime_cxx_api.h>
 #include "nllb_translator.h"
 #include "beam_search.h"
 #include "tokenizer.h"
@@ -20,7 +21,8 @@ NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config)
     , memory_info_(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault))
     , model_dir_(config.nllb.model_dir)
     , target_lang_(config.nllb.target_lang)
-    , is_initialized_(false) {
+    , is_initialized_(false)
+    , last_error_(translator::TranslatorError::OK) {
     
     try {
         // Initialize ONNX Runtime options
@@ -35,7 +37,7 @@ NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config)
             config.nllb.model_files.decoder.c_str(), session_options);
         embed_lm_head_session_ = std::make_unique<Ort::Session>(ort_env_,
             config.nllb.model_files.embed_lm_head.c_str(), session_options);
-        cache_initializer_session_ = std::make_unique<Ort::Session>(ort_env_,
+        cache_init_session_ = std::make_unique<Ort::Session>(ort_env_,
             config.nllb.model_files.cache_initializer.c_str(), session_options);
             
         // Initialize tokenizer
@@ -76,43 +78,58 @@ std::string NLLBTranslator::translate(
     }
     
     try {
-        if (!needs_translation(source_lang)) {
-            return text;
+        if (text.empty()) {
+            set_error(translator::TranslatorError::ERROR_EMPTY_INPUT, "Input text is empty");
+            return "";
         }
-        
+
+        auto normalized_source = normalize_language_code(source_lang);
+        if (!is_language_supported(normalized_source)) {
+            set_error(translator::TranslatorError::ERROR_UNSUPPORTED_LANGUAGE, 
+                     "Source language is not supported: " + source_lang);
+            return "";
+        }
+
         // Tokenize input text
-        auto tokens = tokenizer_->encode(text, source_lang, target_lang_);
+        auto tokens = tokenizer_->encode(text, normalized_source, target_lang_);
         
         // Run encoder
         auto encoder_output = run_encoder(tokens);
         
-        // Initialize beam search
-        BeamSearchDecoder beam_search(
-            model_params_.beam_size,
-            model_params_.length_penalty,
-            tokenizer_->eos_id());
-            
-        // Initialize cache
-        CacheContainer cache;
+        // Get encoder output shape
+        auto shape_info = encoder_output.GetTensorTypeAndShapeInfo();
+        auto encoder_shape = shape_info.GetShape();
+        
+        // Get encoder output data
+        auto* output_data = encoder_output.GetTensorData<float>();
+        size_t output_size = shape_info.GetElementCount();
+        std::vector<float> encoder_data(output_data, output_data + output_size);
         
         // Run beam search
-        auto hypotheses = beam_search.decode(
+        auto hypotheses = beam_search_.decode(
             *decoder_session_,
             *embed_lm_head_session_,
             memory_info_,
-            encoder_output,
-            {static_cast<int64_t>(tokens.input_ids.size())},
-            cache,
-            model_params_);
-            
+            encoder_data,
+            encoder_shape,
+            cache_container_,
+            model_params_
+        );
+
         // Get best hypothesis
-        auto& best_hyp = hypotheses[0];
+        if (hypotheses.empty()) {
+            set_error(translator::TranslatorError::ERROR_TRANSLATION, "No valid translation found");
+            return "";
+        }
         
-        // Decode tokens to text
+        const auto& best_hyp = hypotheses[0];
         return tokenizer_->decode(best_hyp.tokens);
         
+    } catch (const Ort::Exception& e) {
+        set_error(translator::TranslatorError::ERROR_EXECUTING_MODEL, e.what());
+        return "";
     } catch (const std::exception& e) {
-        set_error(translator::TranslatorError::ERROR_TRANSLATION, e.what());
+        set_error(translator::TranslatorError::ERROR_UNKNOWN, e.what());
         return "";
     }
 }
@@ -216,7 +233,7 @@ Ort::Value NLLBTranslator::create_tensor(const std::vector<float>& data,
     );
 }
 
-std::vector<float> NLLBTranslator::run_encoder(const TokenizerResult& tokens) const {
+Ort::Value NLLBTranslator::run_encoder(const TokenizerResult& tokens) const {
     // Prepare input tensors
     std::vector<Ort::Value> input_tensors;
     
@@ -240,11 +257,7 @@ std::vector<float> NLLBTranslator::run_encoder(const TokenizerResult& tokens) co
         output_names,
         1);
         
-    // Get encoder output
-    auto* output_data = output_tensors[0].GetTensorData<float>();
-    size_t output_size = output_tensors[0].GetTensorTypeAndShapeInfo().GetElementCount();
-    
-    return std::vector<float>(output_data, output_data + output_size);
+    return std::move(output_tensors[0]);
 }
 
 std::vector<float> NLLBTranslator::run_embed_lm_head(const std::vector<int64_t>& input_ids) const {
@@ -268,7 +281,7 @@ std::vector<float> NLLBTranslator::run_embed_lm_head(const std::vector<int64_t>&
         output_names,
         1);
         
-    // Get output
+    // Get output data
     auto* output_data = output_tensors[0].GetTensorData<float>();
     size_t output_size = output_tensors[0].GetTensorTypeAndShapeInfo().GetElementCount();
     

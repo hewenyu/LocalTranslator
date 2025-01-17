@@ -69,6 +69,7 @@ private:
     // Tokenizer and cache
     std::unique_ptr<Tokenizer> tokenizer_;
     mutable CacheContainer cache_container_;
+    BeamSearchDecoder beam_search_;
 
     // Configuration
     std::string model_dir_;
@@ -79,6 +80,8 @@ private:
     // Language support
     std::vector<std::string> supported_languages_;
     std::vector<std::string> low_quality_languages_;
+    std::unordered_map<std::string, std::string> nllb_language_codes_;
+    std::unordered_map<std::string, std::string> display_language_codes_;
 
     // Error handling
     mutable translator::TranslatorError last_error_;
@@ -86,15 +89,15 @@ private:
     std::shared_ptr<translator::TranslatorErrorCallback> error_callback_;
 
     // Helper methods
-    void load_language_config();
+    void initialize_language_codes();
+    void load_supported_languages();
     std::string normalize_language_code(const std::string& lang_code) const;
     void set_error(translator::TranslatorError error, const std::string& message) const;
     void notify_error(const translator::TranslatorErrorInfo& error) const;
 
     // Translation pipeline methods
-    Ort::Value run_encoder(const std::vector<int64_t>& input_ids) const;
-    std::vector<int64_t> run_decoder(const Ort::Value& encoder_output,
-                                   const std::vector<int64_t>& encoder_shape) const;
+    Ort::Value run_encoder(const TokenizerResult& tokens) const;
+    std::vector<float> run_embed_lm_head(const std::vector<int64_t>& input_ids) const;
     std::string get_display_language_code(const std::string& nllb_code) const;
     
     // Tensor utilities

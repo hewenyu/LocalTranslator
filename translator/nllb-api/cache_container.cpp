@@ -4,6 +4,10 @@
 
 namespace nllb {
 
+CacheContainer::CacheContainer() : has_cache_(false) {}
+
+CacheContainer::~CacheContainer() = default;
+
 void CacheContainer::initialize(
     Ort::Session& cache_init_session,
     const Ort::MemoryInfo& memory_info,
@@ -42,16 +46,20 @@ void CacheContainer::initialize(
     }
 }
 
-void CacheContainer::add_cache_to_inputs(std::vector<Ort::Value>& inputs) const {
-    if (!cache_values_.empty()) {
-        for (auto& cache_value : cache_values_) {
-            inputs.push_back(std::move(cache_value));
+void CacheContainer::add_cache_to_inputs(std::vector<Ort::Value>& input_tensors) const {
+    if (has_cache_) {
+        for (const auto& cache : cache_values_) {
+            input_tensors.push_back(cache);
         }
     }
 }
 
-void CacheContainer::update_cache(std::vector<Ort::Value>&& new_cache) {
-    cache_values_ = std::move(new_cache);
+void CacheContainer::update_cache(std::vector<Ort::Value>& output_tensors) {
+    cache_values_.clear();
+    for (auto& tensor : output_tensors) {
+        cache_values_.push_back(std::move(tensor));
+    }
+    has_cache_ = true;
 }
 
 const std::vector<Ort::Value>& CacheContainer::get_cache() const {
@@ -60,6 +68,11 @@ const std::vector<Ort::Value>& CacheContainer::get_cache() const {
 
 void CacheContainer::clear() {
     cache_values_.clear();
+    has_cache_ = false;
+}
+
+void CacheContainer::reset() {
+    clear();
 }
 
 } // namespace nllb 

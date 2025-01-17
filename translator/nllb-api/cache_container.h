@@ -7,8 +7,8 @@ namespace nllb {
 
 class CacheContainer {
 public:
-    CacheContainer() = default;
-    ~CacheContainer() = default;
+    CacheContainer();
+    ~CacheContainer();
 
     // Initialize cache with encoder output
     void initialize(
@@ -29,8 +29,12 @@ public:
     // Clear cache
     void clear();
 
+    // Reset cache
+    void reset();
+
 private:
     std::vector<Ort::Value> cache_values_;
+    bool has_cache_;
 };
 
 } // namespace nllb 
