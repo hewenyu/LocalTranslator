@@ -243,21 +243,22 @@ std::vector<float> NLLBTranslator::run_encoder(const Tokenizer::TokenizerOutput&
         
         // 准备输入张量
         std::vector<int64_t> input_shape = {1, static_cast<int64_t>(tokens.input_ids.size())};
+        std::vector<int64_t> input_ids = tokens.input_ids; // 创建可修改的副本
         auto input_tensor = Ort::Value::CreateTensor<int64_t>(
-            memory_info, tokens.input_ids.data(), tokens.input_ids.size(), input_shape.data(), input_shape.size());
+            memory_info, input_ids.data(), input_ids.size(), input_shape.data(), input_shape.size());
 
         // 运行编码器
-        auto start_time = std::chrono::high_resolution_clock::now();
+        const char* input_names[] = {"input_ids"};
+        const char* output_names[] = {"encoder_outputs"};
+        
         auto output_tensors = encoder_session_->Run(
             Ort::RunOptions{nullptr},
-            {"input_ids"},
+            input_names,
             &input_tensor,
             1,
-            {"encoder_outputs"}
+            output_names,
+            1
         );
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-        spdlog::debug("Encoder completed in {} ms", duration.count());
 
         // 获取输出
         float* output_data = output_tensors[0].GetTensorMutableData<float>();
@@ -281,6 +282,46 @@ std::vector<int64_t> NLLBTranslator::run_decoder(
         
         // 生成序列
         while (!state.is_finished()) {
+            // 准备decoder输入
+            auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
+            const auto& current_tokens = state.get_current_tokens();
+            
+            // 创建输入张量
+            std::vector<int64_t> input_shape = {1, static_cast<int64_t>(current_tokens.size())};
+            std::vector<int64_t> input_ids = current_tokens; // 创建可修改的副本
+            
+            auto input_tensor = Ort::Value::CreateTensor<int64_t>(
+                memory_info, input_ids.data(), input_ids.size(), input_shape.data(), input_shape.size());
+            
+            // 运行decoder
+            const char* input_names[] = {"input_ids", "encoder_hidden_states"};
+            const char* output_names[] = {"logits"};
+            
+            std::vector<Ort::Value> inputs;
+            inputs.push_back(std::move(input_tensor));
+            
+            // 创建encoder_hidden_states张量
+            std::vector<int64_t> encoder_shape = {1, static_cast<int64_t>(encoder_output.size() / model_config_.hidden_size), model_config_.hidden_size};
+            auto encoder_tensor = Ort::Value::CreateTensor<float>(
+                memory_info, const_cast<float*>(encoder_output.data()), encoder_output.size(),
+                encoder_shape.data(), encoder_shape.size());
+            inputs.push_back(std::move(encoder_tensor));
+            
+            auto output_tensors = decoder_session_->Run(
+                Ort::RunOptions{nullptr},
+                input_names,
+                inputs.data(),
+                inputs.size(),
+                output_names,
+                1
+            );
+            
+            // 获取logits并更新状态
+            float* logits_data = output_tensors[0].GetTensorMutableData<float>();
+            size_t logits_size = output_tensors[0].GetTensorTypeAndShapeInfo().GetElementCount();
+            std::vector<float> logits(logits_data, logits_data + logits_size);
+            
+            state.set_scores(logits);
             auto next_token = beam_search_decoder_->generate_next_token(state);
             state.append_token(next_token);
         }
