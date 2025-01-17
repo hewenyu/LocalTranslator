@@ -30,9 +30,13 @@ NLLBTranslator::NLLBTranslator(const common::TranslatorConfig& config)
         std::string decoder_path = model_dir_ + "/decoder.onnx";
         std::string cache_init_path = model_dir_ + "/cache_init.onnx";
         
-        encoder_session_ = std::make_unique<Ort::Session>(ort_env_, encoder_path.c_str(), session_options);
-        decoder_session_ = std::make_unique<Ort::Session>(ort_env_, decoder_path.c_str(), session_options);
-        cache_init_session_ = std::make_unique<Ort::Session>(ort_env_, cache_init_path.c_str(), session_options);
+        std::wstring wencoder_path(encoder_path.begin(), encoder_path.end());
+        std::wstring wdecoder_path(decoder_path.begin(), decoder_path.end());
+        std::wstring wcache_init_path(cache_init_path.begin(), cache_init_path.end());
+        
+        encoder_session_ = std::make_unique<Ort::Session>(ort_env_, wencoder_path.c_str(), session_options);
+        decoder_session_ = std::make_unique<Ort::Session>(ort_env_, wdecoder_path.c_str(), session_options);
+        cache_init_session_ = std::make_unique<Ort::Session>(ort_env_, wcache_init_path.c_str(), session_options);
         
         // 初始化分词器
         std::string vocab_path = model_dir_ + "/sentencepiece.model";
@@ -364,6 +368,14 @@ void NLLBTranslator::set_repetition_penalty(float penalty) {
         return;
     }
     model_config_.repetition_penalty = penalty;
+}
+
+void NLLBTranslator::set_num_threads(int threads) {
+    if (threads <= 0) {
+        set_error(TranslatorError::ERROR_INVALID_PARAM, "Number of threads must be positive");
+        return;
+    }
+    model_config_.num_threads = threads;
 }
 
 std::vector<std::string> NLLBTranslator::translate_batch(

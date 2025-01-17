@@ -24,10 +24,8 @@ struct BeamHypothesis {
 
 class BeamSearchDecoder {
 public:
-    BeamSearchDecoder(int beam_size, float length_penalty, float eos_token_id)
-        : beam_size_(beam_size)
-        , length_penalty_(length_penalty)
-        , eos_token_id_(eos_token_id) {}
+    BeamSearchDecoder(int beam_size, float length_penalty, float eos_token_id);
+    ~BeamSearchDecoder() = default;
 
     std::vector<BeamHypothesis> decode(
         Ort::Session& decoder_session,
@@ -60,14 +58,15 @@ public:
             };
 
             std::vector<Ort::Value> ort_inputs;
+            ort_inputs.reserve(4);  // 预分配空间
             ort_inputs.push_back(std::move(input_tensor));
             
             auto encoder_tensor = TensorUtils::createFloatTensor(
                 memory_info, encoder_output, encoder_shape);
             ort_inputs.push_back(std::move(encoder_tensor));
             
-            ort_inputs.push_back(cache.getKeyCache());
-            ort_inputs.push_back(cache.getValueCache());
+            ort_inputs.push_back(std::move(cache.getKeyCache()));
+            ort_inputs.push_back(std::move(cache.getValueCache()));
 
             const char* output_names[] = {"logits", "new_key_cache", "new_value_cache"};
             

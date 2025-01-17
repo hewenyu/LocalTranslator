@@ -5,6 +5,7 @@ add_library(translator STATIC
     nllb-api/beam_search.cpp
     nllb-api/tokenizer.cpp
     nllb-api/language_detector.cpp
+    nllb-api/cache_container.cpp
 )
 
 target_include_directories(translator
