@@ -497,7 +497,8 @@ std::string NLLBTranslator::translate(const std::string& text, const std::string
 
     // 获取翻译锁
     std::lock_guard<std::mutex> lock(translation_mutex_);
-    if (is_translating_.exchange(true)) {
+    bool expected = false;
+    if (!is_translating_.compare_exchange_strong(expected, true)) {
         throw std::runtime_error("Translation already in progress");
     }
 
@@ -520,10 +521,10 @@ std::string NLLBTranslator::translate(const std::string& text, const std::string
         // 将输出转换为文本
         std::string result = tokenizer_->decode(output_ids);
         
-        is_translating_ = false;
+        is_translating_.store(false);
         return result;
     } catch (const std::exception& e) {
-        is_translating_ = false;
+        is_translating_.store(false);
         spdlog::error("Translation failed: {}", e.what());
         throw std::runtime_error("Translation failed: " + std::string(e.what()));
     }

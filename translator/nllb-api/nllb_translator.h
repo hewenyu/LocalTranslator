@@ -78,7 +78,7 @@ private:
     // State management
     bool is_initialized_;
     mutable std::mutex translation_mutex_;
-    std::atomic<bool> is_translating_;
+    mutable std::atomic<bool> is_translating_{false};
 
     // Initialization methods
     void initialize_language_codes();
